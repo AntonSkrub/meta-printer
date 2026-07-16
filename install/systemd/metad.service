@@ -1,0 +1,24 @@
+[Unit]
+Description=Meta-Printer Metadata Daemon
+Documentation=https://github.com/AntonSkrub/meta-printer
+# Start after the desktop session is available so that $HOME and document
+# directories already exist.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# The daemon binary is installed to /usr/local/bin by install.sh.
+ExecStart=/usr/local/bin/metad
+# Restart automatically on unexpected exit; do not restart on clean exit (0).
+Restart=on-failure
+RestartSec=5s
+# Write journal output with the identifier "metad".
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=metad
+# Keep a reasonably-sized metadata database by vacuuming on startup.
+# (metad itself does not do this; it is left to SQLite's auto-vacuum.)
+
+[Install]
+WantedBy=default.target
