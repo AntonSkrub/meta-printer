@@ -28,8 +28,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/AntonSkrub/meta-printer/internal/db"
-	"github.com/AntonSkrub/meta-printer/internal/filter"
+	"github.com/AntonSkrub/meta-printer/pkg/db"
+	"github.com/AntonSkrub/meta-printer/pkg/filter"
 )
 
 func main() {

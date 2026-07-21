@@ -26,8 +26,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/AntonSkrub/meta-printer/internal/db"
-	"github.com/AntonSkrub/meta-printer/internal/watcher"
+	"github.com/AntonSkrub/meta-printer/pkg/db"
+	"github.com/AntonSkrub/meta-printer/pkg/watcher"
 )
 
 func main() {
