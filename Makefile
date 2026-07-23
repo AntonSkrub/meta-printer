@@ -20,10 +20,10 @@ build: $(METAD) $(METAFILTER)
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
-$(METAD): $(BIN_DIR) $(shell find cmd/metad internal -name '*.go')
+$(METAD): $(BIN_DIR) $(shell find cmd/metad pkg -name '*.go')
 	go build $(GOFLAGS) -o $@ ./cmd/metad
 
-$(METAFILTER): $(BIN_DIR) $(shell find cmd/metafilter internal -name '*.go')
+$(METAFILTER): $(BIN_DIR) $(shell find cmd/metafilter pkg -name '*.go')
 	go build $(GOFLAGS) -o $@ ./cmd/metafilter
 
 test:

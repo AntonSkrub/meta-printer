@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/AntonSkrub/meta-printer/pkg/config"
 	"github.com/AntonSkrub/meta-printer/pkg/db"
 	"github.com/AntonSkrub/meta-printer/pkg/filter"
 )
@@ -90,8 +91,12 @@ func buildMetadata(user, title string) *filter.Metadata {
 		PrintTime: time.Now(),
 	}
 
-	dbPath := dbPathForUser(user)
-	store, err := db.New(dbPath)
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("metafilter: config warning: %v (using defaults)", err)
+	}
+
+	store, err := db.New(filepath.Join(cfg.FilterDBDir, user+".db"))
 	if err != nil {
 		// Database not available – use job-title metadata only.
 		return meta
@@ -113,11 +118,4 @@ func buildMetadata(user, title string) *filter.Metadata {
 		log.Printf("metafilter: mark printed: %v", err)
 	}
 	return meta
-}
-
-// dbPathForUser returns the path to the metadata database for a given user.
-// Databases are stored in /var/lib/meta-printer/ so that the lp user (which
-// CUPS filters run as) can read them.
-func dbPathForUser(user string) string {
-	return filepath.Join("/var/lib/meta-printer", user+".db")
 }

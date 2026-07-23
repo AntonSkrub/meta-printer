@@ -22,17 +22,22 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
+	"github.com/AntonSkrub/meta-printer/pkg/config"
 	"github.com/AntonSkrub/meta-printer/pkg/db"
 	"github.com/AntonSkrub/meta-printer/pkg/watcher"
 )
 
 func main() {
-	dbPath := flag.String("db", defaultDBPath(), "path to SQLite metadata database")
-	watchDirs := flag.String("watch", defaultWatchDirs(), "colon-separated directories to watch")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("metad: config warning: %v (using defaults)", err)
+	}
+
+	dbPath := flag.String("db", cfg.DaemonDB, "path to SQLite metadata database")
+	watchDirs := flag.String("watch", strings.Join(cfg.WatchDirs, ":"), "colon-separated directories to watch")
 	verbose := flag.Bool("v", false, "verbose output")
 	flag.Parse()
 
@@ -90,34 +95,4 @@ func splitDirs(s string) []string {
 		}
 	}
 	return dirs
-}
-
-// defaultDBPath returns the user-specific default database path.
-func defaultDBPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "/var/lib/meta-printer/metadata.db"
-	}
-	return filepath.Join(home, ".local", "share", "meta-printer", "metadata.db")
-}
-
-// defaultWatchDirs returns a colon-separated list of the standard user
-// document directories that exist on the current system.
-func defaultWatchDirs() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	candidates := []string{
-		filepath.Join(home, "Documents"),
-		filepath.Join(home, "Downloads"),
-		filepath.Join(home, "Desktop"),
-	}
-	var existing []string
-	for _, d := range candidates {
-		if _, err := os.Stat(d); err == nil {
-			existing = append(existing, d)
-		}
-	}
-	return strings.Join(existing, ":")
 }
