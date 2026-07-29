@@ -23,21 +23,62 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/AntonSkrub/meta-printer/pkg/config"
 	"github.com/AntonSkrub/meta-printer/pkg/db"
 	"github.com/AntonSkrub/meta-printer/pkg/filter"
+	"github.com/valentin-kaiser/go-core/apperror"
+	"github.com/valentin-kaiser/go-core/flag"
+	"github.com/valentin-kaiser/go-core/interruption"
+	"github.com/valentin-kaiser/go-core/version"
 )
 
+func init() {
+	defer interruption.Catch()
+	apperror.ErrorHandler = func(err error, msg string) { //nolint:reassign
+		log.Error().Err(err).Msg(msg)
+	}
+	config.Init()
+}
+
 func main() {
+	defer interruption.Catch()
+
+	if flag.Help {
+		flag.PrintHelp()
+		return
+	}
+
+	if flag.Version {
+		log.Info().Str("version", version.String()).Msg("metafilter")
+		fmt.Print(version.String())
+		return
+	}
+
+	log.Info().Msgf("=== Meta-Printer filter %s ===", version.String())
+	if flag.Debug {
+		log.Debug().Msgf("[Init] running in debug mode")
+		log.Debug().Msgf("[App] data path: %s", flag.Path)
+
+		log.Debug().Msgf("[Git] git tag: %s", version.GitTag)
+		log.Debug().Msgf("[Git] git commit: %s", version.GitCommit)
+		log.Debug().Msgf("[Git] git short: %s", version.GitShort)
+		log.Debug().Msgf("[Git] build date: %s", version.BuildDate)
+		log.Debug().Msgf("[Runtime] version: %s %s", version.GoVersion, version.Platform)
+
+		for _, mod := range version.Modules {
+			log.Debug().Msgf("[Module] %s %s %s", mod.Path, mod.Version, mod.Sum)
+		}
+	}
+
 	// CUPS passes exactly 5 or 6 positional arguments (plus argv[0]).
 	if len(os.Args) < 6 {
-		fmt.Fprintln(os.Stderr,
-			"Usage: metafilter job-id user title copies options [filename]")
+		log.Info().Msg("Usage: metafilter job-id user title copies options [filename]")
 		os.Exit(1)
 	}
 
@@ -49,7 +90,7 @@ func main() {
 	// Open input: file argument takes precedence over stdin.
 	input, closeInput, err := openInput(os.Args)
 	if err != nil {
-		log.Fatalf("metafilter: open input: %v", err)
+		log.Fatal().Err(err).Msg("metafilter: open input")
 	}
 	defer closeInput()
 
@@ -62,7 +103,7 @@ func main() {
 	}
 
 	if err := filter.Prepend(contentType, meta, input, os.Stdout); err != nil {
-		log.Fatalf("metafilter: prepend metadata: %v", err)
+		log.Fatal().Err(err).Msg("metafilter: prepend metadata")
 	}
 }
 
@@ -91,12 +132,9 @@ func buildMetadata(user, title string) *filter.Metadata {
 		PrintTime: time.Now(),
 	}
 
-	cfg, err := config.Load()
-	if err != nil {
-		log.Printf("metafilter: config warning: %v (using defaults)", err)
-	}
+	cfg := config.Get()
 
-	store, err := db.New(filepath.Join(cfg.FilterDBDir, user+".db"))
+	store, err := db.New(filepath.Join(cfg.DatabaseDir, user+".db"))
 	if err != nil {
 		// Database not available – use job-title metadata only.
 		return meta
@@ -106,7 +144,7 @@ func buildMetadata(user, title string) *filter.Metadata {
 	record, err := store.LookupByFilename(meta.Filename)
 	if err != nil {
 		if err != sql.ErrNoRows {
-			log.Printf("metafilter: db lookup: %v", err)
+			log.Error().Err(err).Msg("metafilter: db lookup")
 		}
 		return meta
 	}
@@ -115,7 +153,7 @@ func buildMetadata(user, title string) *filter.Metadata {
 	meta.Filepath = record.Filepath
 
 	if err := store.MarkPrinted(record.ID); err != nil {
-		log.Printf("metafilter: mark printed: %v", err)
+		log.Error().Err(err).Msg("metafilter: mark printed")
 	}
 	return meta
 }

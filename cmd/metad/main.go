@@ -11,59 +11,95 @@
 //
 // Flags:
 //
-//	-db    path to SQLite metadata database (default: ~/.local/share/meta-printer/metadata.db)
-//	-watch colon-separated list of directories to watch
-//	       (default: ~/Documents:~/Downloads:~/Desktop)
-//	-v     verbose output
+//	--path         application data directory (default: ~/.local/share/metad)
+//	--watch-dirs   list of directories to watch
+//	--log-level    log verbosity (-1 = trace … 5 = panic)
 package main
 
 import (
-	"flag"
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
-	"strings"
+	"path/filepath"
 	"syscall"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/AntonSkrub/meta-printer/pkg/config"
 	"github.com/AntonSkrub/meta-printer/pkg/db"
 	"github.com/AntonSkrub/meta-printer/pkg/watcher"
+	"github.com/valentin-kaiser/go-core/apperror"
+	"github.com/valentin-kaiser/go-core/flag"
+	"github.com/valentin-kaiser/go-core/interruption"
+	"github.com/valentin-kaiser/go-core/version"
 )
 
+func init() {
+	defer interruption.Catch()
+	apperror.ErrorHandler = func(err error, msg string) { //nolint:reassign
+		log.Error().Err(err).Msg(msg)
+	}
+	config.Init()
+
+	zerolog.SetGlobalLevel(zerolog.Level(config.Get().LogLevel))
+}
+
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Printf("metad: config warning: %v (using defaults)", err)
+	defer interruption.Catch()
+
+	if flag.Help {
+		flag.PrintHelp()
+		return
 	}
 
-	dbPath := flag.String("db", cfg.DaemonDB, "path to SQLite metadata database")
-	watchDirs := flag.String("watch", strings.Join(cfg.WatchDirs, ":"), "colon-separated directories to watch")
-	verbose := flag.Bool("v", false, "verbose output")
-	flag.Parse()
+	if flag.Version {
+		log.Info().Str("version", version.String()).Msg("metad")
+		fmt.Print(version.String())
+		return
+	}
 
-	store, err := db.New(*dbPath)
+	log.Info().Msgf("=== Meta-Printer daemon %s ===", version.String())
+	if flag.Debug {
+		log.Debug().Msgf("[Init] running in debug mode")
+		log.Debug().Msgf("[App] data path: %s", flag.Path)
+
+		log.Debug().Msgf("[Git] git tag: %s", version.GitTag)
+		log.Debug().Msgf("[Git] git commit: %s", version.GitCommit)
+		log.Debug().Msgf("[Git] git short: %s", version.GitShort)
+		log.Debug().Msgf("[Git] build date: %s", version.BuildDate)
+		log.Debug().Msgf("[Runtime] version: %s %s", version.GoVersion, version.Platform)
+
+		for _, mod := range version.Modules {
+			log.Debug().Msgf("[Module] %s %s %s", mod.Path, mod.Version, mod.Sum)
+		}
+	}
+
+	cfg := config.Get()
+
+	dbPath := filepath.Join(cfg.DatabaseDir, cfg.DaemonDB.Name+".db")
+	store, err := db.New(dbPath)
 	if err != nil {
-		log.Fatalf("metad: open database: %v", err)
+		log.Fatal().Err(err).Msg("metad: open database")
 	}
 	defer store.Close()
 
 	w, err := watcher.New()
 	if err != nil {
-		log.Fatalf("metad: create watcher: %v", err)
+		log.Fatal().Err(err).Msg("metad: create watcher")
 	}
 	defer w.Stop()
 
-	for _, dir := range splitDirs(*watchDirs) {
+	for _, dir := range cfg.WatchDirs {
 		if err := w.Add(dir); err != nil {
-			log.Printf("metad: warning: cannot watch %q: %v", dir, err)
-		} else if *verbose {
-			log.Printf("metad: watching %q", dir)
+			log.Warn().Err(err).Str("dir", dir).Msg("metad: cannot watch directory")
+		} else {
+			log.Debug().Str("dir", dir).Msg("metad: watching")
 		}
 	}
 
 	w.Start()
-
-	log.Printf("metad: started – database: %s", *dbPath)
+	log.Info().Str("database", dbPath).Msg("metad: started")
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
@@ -72,27 +108,15 @@ func main() {
 		select {
 		case ev := <-w.Events:
 			if err := store.RecordOpen(ev.Name, ev.Path); err != nil {
-				log.Printf("metad: record open %q: %v", ev.Path, err)
-			} else if *verbose {
-				log.Printf("metad: recorded %q", ev.Path)
+				log.Error().Err(err).Str("path", ev.Path).Msg("metad: record open")
+			} else {
+				log.Debug().Str("path", ev.Path).Msg("metad: recorded")
 			}
 		case err := <-w.Errors:
-			log.Printf("metad: watcher error: %v", err)
+			log.Error().Err(err).Msg("metad: watcher error")
 		case <-sig:
-			log.Println("metad: shutting down")
+			log.Info().Msg("metad: shutting down")
 			return
 		}
 	}
-}
-
-// splitDirs returns the non-empty directories from a colon-separated list.
-func splitDirs(s string) []string {
-	var dirs []string
-	for _, d := range strings.Split(s, ":") {
-		d = strings.TrimSpace(d)
-		if d != "" {
-			dirs = append(dirs, d)
-		}
-	}
-	return dirs
 }
