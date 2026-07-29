@@ -1,6 +1,8 @@
 module github.com/AntonSkrub/meta-printer
 
-go 1.25.0
+go 1.26
+
+toolchain go1.26.1
 
 require (
 	github.com/pdfcpu/pdfcpu v0.13.0
