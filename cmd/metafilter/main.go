@@ -30,7 +30,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AntonSkrub/meta-printer/pkg/config"
-	"github.com/AntonSkrub/meta-printer/pkg/db"
+	"github.com/AntonSkrub/meta-printer/pkg/database"
 	"github.com/AntonSkrub/meta-printer/pkg/filter"
 	"github.com/valentin-kaiser/go-core/apperror"
 	"github.com/valentin-kaiser/go-core/flag"
@@ -134,7 +134,7 @@ func buildMetadata(user, title string) *filter.Metadata {
 
 	cfg := config.Get()
 
-	store, err := db.New(filepath.Join(cfg.DatabaseDir, user+".db"))
+	store, err := database.New(filepath.Join(cfg.DatabaseDir, user+".db"))
 	if err != nil {
 		// Database not available – use job-title metadata only.
 		return meta

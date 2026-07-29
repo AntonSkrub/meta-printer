@@ -27,7 +27,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AntonSkrub/meta-printer/pkg/config"
-	"github.com/AntonSkrub/meta-printer/pkg/db"
+	"github.com/AntonSkrub/meta-printer/pkg/database"
 	"github.com/AntonSkrub/meta-printer/pkg/watcher"
 	"github.com/valentin-kaiser/go-core/apperror"
 	"github.com/valentin-kaiser/go-core/flag"
@@ -78,7 +78,7 @@ func main() {
 	cfg := config.Get()
 
 	dbPath := filepath.Join(cfg.DatabaseDir, cfg.DaemonDB.Name+".db")
-	store, err := db.New(dbPath)
+	store, err := database.New(dbPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("metad: open database")
 	}
