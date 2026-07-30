@@ -17,7 +17,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -107,7 +109,12 @@ func main() {
 	for {
 		select {
 		case ev := <-w.Events:
-			if err := store.RecordOpen(ev.Name, ev.Path); err != nil {
+			hash, err := hashFile(ev.Path)
+			if err != nil {
+				log.Warn().Err(err).Str("path", ev.Path).Msg("metad: hash file")
+			}
+
+			if err := store.RecordOpen(ev.Name, ev.Path, hash); err != nil {
 				log.Error().Err(err).Str("path", ev.Path).Msg("metad: record open")
 			} else {
 				log.Debug().Str("path", ev.Path).Msg("metad: recorded")
@@ -119,4 +126,18 @@ func main() {
 			return
 		}
 	}
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash: %w", err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }

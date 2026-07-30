@@ -17,6 +17,7 @@ type FileMetadata struct {
 	ID        int64
 	Filename  string
 	Filepath  string
+	FileHash  string
 	OpenedAt  time.Time
 	PrintedAt *time.Time
 }
@@ -59,20 +60,46 @@ func (s *Store) migrate() error {
 			id          INTEGER  PRIMARY KEY AUTOINCREMENT,
 			filename    TEXT     NOT NULL,
 			filepath    TEXT     NOT NULL,
+			file_hash   TEXT,
 			opened_at   DATETIME NOT NULL,
 			printed_at  DATETIME
 		);
 		CREATE INDEX IF NOT EXISTS idx_filename
 			ON file_metadata (filename, opened_at DESC);
 	`)
+	if err != nil {
+		return err
+	}
+
+	hasHash, err := s.columnExists("file_metadata", "file_hash")
+	if err != nil {
+		return err
+	}
+	if !hasHash {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN file_hash TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_file_hash
+			ON file_metadata (file_hash, opened_at DESC)
+	`); err != nil {
+		return err
+	}
+
 	return err
 }
 
 // RecordOpen stores metadata for a file that was just opened.
-func (s *Store) RecordOpen(filename, filePath string) error {
+func (s *Store) RecordOpen(filename, filePath, fileHash string) error {
+	var hashValue any
+	if fileHash != "" {
+		hashValue = fileHash
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO file_metadata (filename, filepath, opened_at) VALUES (?, ?, ?)`,
-		filename, filePath, time.Now().UTC(),
+		`INSERT INTO file_metadata (filename, filepath, file_hash, opened_at) VALUES (?, ?, ?, ?)`,
+		filename, filePath, hashValue, time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("db: record open: %w", err)
@@ -80,11 +107,24 @@ func (s *Store) RecordOpen(filename, filePath string) error {
 	return nil
 }
 
+// LookupByFileHash returns the most-recently-opened record matching fileHash.
+// Returns sql.ErrNoRows if no match is found.
+func (s *Store) LookupByFileHash(fileHash string) (*FileMetadata, error) {
+	row := s.db.QueryRow(`
+		SELECT id, filename, filepath, file_hash, opened_at, printed_at
+		FROM file_metadata
+		WHERE file_hash = ?
+		ORDER BY opened_at DESC
+		LIMIT 1
+	`, fileHash)
+	return scanRow(row)
+}
+
 // LookupByFilename returns the most-recently-opened record matching filename.
 // Returns sql.ErrNoRows if no match is found.
 func (s *Store) LookupByFilename(filename string) (*FileMetadata, error) {
 	row := s.db.QueryRow(`
-		SELECT id, filename, filepath, opened_at, printed_at
+		SELECT id, filename, filepath, file_hash, opened_at, printed_at
 		FROM file_metadata
 		WHERE filename = ?
 		ORDER BY opened_at DESC
@@ -112,12 +152,42 @@ func (s *Store) Close() error {
 
 func scanRow(row *sql.Row) (*FileMetadata, error) {
 	var m FileMetadata
+	var fileHash sql.NullString
 	var printedAt sql.NullTime
-	if err := row.Scan(&m.ID, &m.Filename, &m.Filepath, &m.OpenedAt, &printedAt); err != nil {
+	if err := row.Scan(&m.ID, &m.Filename, &m.Filepath, &fileHash, &m.OpenedAt, &printedAt); err != nil {
 		return nil, err
+	}
+	if fileHash.Valid {
+		m.FileHash = fileHash.String
 	}
 	if printedAt.Valid {
 		m.PrintedAt = &printedAt.Time
 	}
 	return &m, nil
+}
+
+func (s *Store) columnExists(tableName, columnName string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == columnName {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }

@@ -20,6 +20,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"io"
@@ -88,13 +89,13 @@ func main() {
 	title := os.Args[3]
 
 	// Open input: file argument takes precedence over stdin.
-	input, closeInput, err := openInput(os.Args)
+	input, closeInput, sourcePath, err := openInput(os.Args)
 	if err != nil {
 		log.Fatal().Err(err).Msg("metafilter: open input")
 	}
 	defer closeInput()
 
-	meta := buildMetadata(user, title)
+	meta := buildMetadata(user, title, sourcePath)
 
 	// Determine content type from the CUPS environment variable.
 	contentType := os.Getenv("CONTENT_TYPE")
@@ -110,22 +111,22 @@ func main() {
 // openInput returns a reader for the print-job content.
 // If argv[6] is provided and non-empty, the file is opened; otherwise stdin
 // is returned. The returned closer must be called when done.
-func openInput(args []string) (io.Reader, func(), error) {
+func openInput(args []string) (io.Reader, func(), string, error) {
 	if len(args) >= 7 && args[6] != "" {
 		f, err := os.Open(args[6])
 		if err != nil {
-			return nil, func() {}, err
+			return nil, func() {}, "", err
 		}
-		return f, func() { f.Close() }, nil
+		return f, func() { f.Close() }, args[6], nil
 	}
-	return os.Stdin, func() {}, nil
+	return os.Stdin, func() {}, "", nil
 }
 
 // buildMetadata constructs the Metadata struct for a print job.
 // It first tries to look up the original file path from the daemon's database;
 // if that fails (db unavailable or no matching record) it falls back to
 // using the job title as both filename and path.
-func buildMetadata(user, title string) *filter.Metadata {
+func buildMetadata(user, title, sourcePath string) *filter.Metadata {
 	meta := &filter.Metadata{
 		Filename:  filepath.Base(title),
 		Filepath:  title,
@@ -141,6 +142,21 @@ func buildMetadata(user, title string) *filter.Metadata {
 	}
 	defer store.Close()
 
+	if sourcePath != "" {
+		hash, err := hashFile(sourcePath)
+		if err != nil {
+			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: hash input")
+		} else if record, err := store.LookupByFileHash(hash); err == nil {
+			meta.Filepath = record.Filepath
+			if err := store.MarkPrinted(record.ID); err != nil {
+				log.Error().Err(err).Msg("metafilter: mark printed")
+			}
+			return meta
+		} else if err != sql.ErrNoRows {
+			log.Error().Err(err).Msg("metafilter: db hash lookup")
+		}
+	}
+
 	record, err := store.LookupByFilename(meta.Filename)
 	if err != nil {
 		if err != sql.ErrNoRows {
@@ -149,11 +165,24 @@ func buildMetadata(user, title string) *filter.Metadata {
 		return meta
 	}
 
-	// Enrich with the full path recorded by the daemon.
-	meta.Filepath = record.Filepath
-
 	if err := store.MarkPrinted(record.ID); err != nil {
 		log.Error().Err(err).Msg("metafilter: mark printed")
 	}
+	// Enrich with the full path recorded by the daemon.
+	meta.Filepath = record.Filepath
 	return meta
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash: %w", err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
