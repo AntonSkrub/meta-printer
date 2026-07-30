@@ -135,7 +135,7 @@ func buildMetadata(user, title, sourcePath string) *filter.Metadata {
 
 	cfg := config.Get()
 
-	store, err := database.New(filepath.Join(cfg.DatabaseDir, user+".db"))
+	store, err := database.New(filepath.Join(cfg.DatabaseDir, config.Get().DaemonDB.Name+".db"))
 	if err != nil {
 		// Database not available – use job-title metadata only.
 		return meta

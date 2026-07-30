@@ -23,10 +23,11 @@ type Config struct {
 	LogLevel int8 `usage:"(0 = debug, 1 = info, 2 = warn, 3 = error, 4 = fatal, 5 = panic)"`
 	// WatchDirs is the list of directories monitored by metad for file-open events.
 	WatchDirs []string `usage:"list of directories to watch for file-open events"`
-	// DaemonDB is the path to the SQLite database written by metad.
+	// DaemonDB is the database configuration for the application used by both metad and metafilter.
+	// stores file-open events detected by metad and read by metafilter at print time.
 	DaemonDB DatabaseConfig `usage:"database configuration for the daemon"`
-	// DatabaseDir is the directory that contains the per-user SQLite databases read by metafilter at print time.
-	DatabaseDir string `usage:"directory that contains the per-user SQLite databases read by metafilter at print time"`
+	// DatabaseDir is the directory that contains the SQLite databases read by metafilter at print time.
+	DatabaseDir string `usage:"directory that contains the SQLite databases read by metafilter at print time"`
 }
 
 type DatabaseConfig struct {
