@@ -1,91 +1,106 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
-func TestDefault_HasDaemonDB(t *testing.T) {
-	cfg := Default()
-	if cfg.DaemonDB == "" {
-		t.Error("DaemonDB should not be empty")
+func TestDefaultWatchDirs_FindsExistingDirs(t *testing.T) {
+	home := t.TempDir()
+	for _, dir := range []string{"Documents", "Downloads", "Desktop"} {
+		if err := os.Mkdir(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := defaultWatchDirs(home)
+	want := []string{
+		filepath.Join(home, "Documents"),
+		filepath.Join(home, "Downloads"),
+		filepath.Join(home, "Desktop"),
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("defaultWatchDirs: got %v, want %v", got, want)
 	}
 }
 
-func TestDefault_FilterDBDir(t *testing.T) {
-	cfg := Default()
-	if cfg.FilterDBDir != "/var/lib/meta-printer" {
-		t.Errorf("FilterDBDir: got %q, want %q", cfg.FilterDBDir, "/var/lib/meta-printer")
+func TestDefaultWatchDirs_EmptyHome(t *testing.T) {
+	if got := defaultWatchDirs(""); got != nil {
+		t.Errorf("defaultWatchDirs: got %v, want nil", got)
 	}
 }
 
-func TestLoad_NoConfigFile(t *testing.T) {
-	// Point XDG_CONFIG_HOME to an empty temp dir so no config file is found.
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+func TestConfigValidate(t *testing.T) {
+	cfg := Config{
+		LogLevel:    -1,
+		WatchDirs:   []string{"/tmp/watch"},
+		DatabaseDir: "/var/lib/meta-printer",
+		DaemonDB: DatabaseConfig{
+			Driver: "sqlite",
+			Name:   "metadata",
+		},
+	}
 
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: unexpected error: %v", err)
-	}
-	def := Default()
-	if cfg.DaemonDB != def.DaemonDB {
-		t.Errorf("DaemonDB: got %q, want %q", cfg.DaemonDB, def.DaemonDB)
-	}
-	if cfg.FilterDBDir != def.FilterDBDir {
-		t.Errorf("FilterDBDir: got %q, want %q", cfg.FilterDBDir, def.FilterDBDir)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 
-func TestLoad_OverridesDefaults(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-
-	cfgDir := filepath.Join(dir, "meta-printer")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
+func TestConfigValidate_RejectsEmptyWatchDirs(t *testing.T) {
+	cfg := Config{
+		LogLevel:    -1,
+		DatabaseDir: "/var/lib/meta-printer",
+		DaemonDB: DatabaseConfig{
+			Driver: "sqlite",
+			Name:   "metadata",
+		},
 	}
 
-	want := Config{
-		DaemonDB:    "/tmp/test.db",
-		WatchDirs:   []string{"/tmp/watch1", "/tmp/watch2"},
-		FilterDBDir: "/tmp/filter",
-	}
-	data, _ := json.Marshal(want)
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got.DaemonDB != want.DaemonDB {
-		t.Errorf("DaemonDB: got %q, want %q", got.DaemonDB, want.DaemonDB)
-	}
-	if got.FilterDBDir != want.FilterDBDir {
-		t.Errorf("FilterDBDir: got %q, want %q", got.FilterDBDir, want.FilterDBDir)
-	}
-	if len(got.WatchDirs) != len(want.WatchDirs) {
-		t.Errorf("WatchDirs length: got %d, want %d", len(got.WatchDirs), len(want.WatchDirs))
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate should reject empty watch dirs")
 	}
 }
 
-func TestLoad_InvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-
-	cfgDir := filepath.Join(dir, "meta-printer")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte("{bad json"), 0o644); err != nil {
-		t.Fatal(err)
+func TestConfigValidate_RejectsMissingDatabaseDir(t *testing.T) {
+	cfg := Config{
+		LogLevel:  -1,
+		WatchDirs: []string{"/tmp/watch"},
+		DaemonDB: DatabaseConfig{
+			Driver: "sqlite",
+			Name:   "metadata",
+		},
 	}
 
-	_, err := Load()
-	if err == nil {
-		t.Error("Load should return an error for invalid JSON")
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate should reject empty database dir")
+	}
+}
+
+func TestDatabaseConfigValidate_SQLiteRequiresName(t *testing.T) {
+	dc := DatabaseConfig{Driver: "sqlite"}
+	if err := dc.Validate(); err == nil {
+		t.Fatal("Validate should reject sqlite config without a name")
+	}
+}
+
+func TestDatabaseConfigValidate_NonSQLiteRequiresConnectionFields(t *testing.T) {
+	dc := DatabaseConfig{Driver: "postgres"}
+	if err := dc.Validate(); err == nil {
+		t.Fatal("Validate should reject incomplete non-sqlite config")
+	}
+
+	dc = DatabaseConfig{
+		Driver:   "postgres",
+		Host:     "localhost",
+		Port:     5432,
+		User:     "user",
+		Password: "secret",
+		Name:     "meta",
+	}
+	if err := dc.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }

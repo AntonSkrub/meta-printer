@@ -117,7 +117,7 @@ func (c Config) Validate() error {
 	if c.LogLevel < -1 || c.LogLevel > 5 {
 		return apperror.NewError("LogLevel must be between -1 and 5")
 	}
-	if c.WatchDirs == nil || len(c.WatchDirs) == 0 {
+	if len(c.WatchDirs) == 0 {
 		return apperror.NewError("WatchDirs can not be empty")
 	}
 
