@@ -3,19 +3,8 @@
 // Configuration is read from the first JSON file found in the following
 // locations (in order):
 //
-//  1. $XDG_CONFIG_HOME/meta-printer/config.json  (defaults to ~/.config/…)
-//  2. /etc/meta-printer/config.json
-//
-// Missing or unreadable files are silently skipped.  Fields absent from the
+// Missing or unreadable files are silently skipped. Fields absent from the
 // file retain their computed default values.
-//
-// Example config.json:
-//
-//	{
-//	  "daemon_db":     "/home/alice/.local/share/meta-printer/metadata.db",
-//	  "watch_dirs":    ["/home/alice/Documents", "/home/alice/Downloads"],
-//	  "filter_db_dir": "/var/lib/meta-printer"
-//	}
 package config
 
 import (
@@ -128,7 +117,7 @@ func (c Config) Validate() error {
 	if c.LogLevel < -1 || c.LogLevel > 5 {
 		return apperror.NewError("LogLevel must be between -1 and 5")
 	}
-	if c.WatchDirs == nil || len(c.WatchDirs) == 0 {
+	if len(c.WatchDirs) == 0 {
 		return apperror.NewError("WatchDirs can not be empty")
 	}
 
@@ -171,16 +160,3 @@ func (dc DatabaseConfig) Validate() error {
 	}
 	return nil
 }
-
-// // searchPaths returns the ordered list of config file locations to try.
-// func searchPaths() []string {
-// 	xdg := os.Getenv("XDG_CONFIG_HOME")
-// 	if xdg == "" {
-// 		home, _ := os.UserHomeDir()
-// 		xdg = filepath.Join(home, ".config")
-// 	}
-// 	return []string{
-// 		filepath.Join(xdg, "meta-printer", "config.json"),
-// 		"/etc/meta-printer/config.json",
-// 	}
-// }

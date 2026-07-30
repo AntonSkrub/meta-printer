@@ -4,6 +4,7 @@
 package watcher
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"unsafe"
@@ -23,8 +24,10 @@ var supportedExts = map[string]bool{
 
 // Event represents a file-open detection.
 type Event struct {
-	Name string // base filename
-	Path string // full path
+	Name     string // base filename
+	Path     string // full path
+	DeviceID uint64 // filesystem device id
+	InodeNum uint64 // inode number within the filesystem
 }
 
 // Watcher monitors directories via inotify and emits Events when a watched
@@ -114,11 +117,33 @@ func (w *Watcher) readEvents() {
 			}
 
 			dir := w.wds[wd]
+			fullPath := filepath.Join(dir, name)
+			ev := Event{Name: name, Path: fullPath}
+
+			if deviceID, inodeNum, err := statIdentity(fullPath); err != nil {
+				select {
+				case w.Errors <- fmt.Errorf("watcher: stat %q: %w", fullPath, err):
+				default:
+				}
+			} else {
+				ev.DeviceID = deviceID
+				ev.InodeNum = inodeNum
+			}
+
 			select {
-			case w.Events <- Event{Name: name, Path: filepath.Join(dir, name)}:
+			case w.Events <- ev:
 			default:
 				// Channel full – discard event.
 			}
 		}
 	}
+}
+
+func statIdentity(path string) (uint64, uint64, error) {
+	var stat unix.Stat_t
+	if err := unix.Stat(path, &stat); err != nil {
+		return 0, 0, err
+	}
+
+	return uint64(stat.Dev), stat.Ino, nil
 }
