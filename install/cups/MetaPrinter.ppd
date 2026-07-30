@@ -1,0 +1,61 @@
+*PPD-Adobe: "4.3"
+*FormatVersion: "4.3"
+*FileVersion: "1.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "METAPRN.PPD"
+*Manufacturer: "MetaPrinter"
+*Product: "(MetaPrinter)"
+*cupsVersion: 1.1
+*cupsManualCopies: True
+*cupsModelNumber: 0
+*cupsLanguages: "en"
+*ModelName: "MetaPrinter"
+*ShortNickName: "MetaPrinter"
+*NickName: "Meta Printer, metadata-injecting CUPS filter"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "8"
+*LandscapeOrientation: Plus90
+*VariablePaperSize: False
+*TTRasterizer: Type42
+
+*% ---- Supported input formats ----------------------------------------
+*% metafilter accepts PDF, PostScript, and plain text, passes the same
+*% MIME type through with the metadata cover page prepended.
+*cupsFilter2: "application/pdf application/pdf 0 metafilter"
+*cupsFilter2: "application/postscript application/postscript 0 metafilter"
+*cupsFilter2: "text/plain application/postscript 100 metafilter"
+
+*% ---- Page sizes -----------------------------------------------------
+*OpenUI *PageSize/Media Size: PickOne
+*DefaultPageSize: A4
+*PageSize A4/A4: "<</PageSize [595 842] /ImagingBBox null>> setpagedevice"
+*PageSize Letter/US Letter: "<</PageSize [612 792] /ImagingBBox null>> setpagedevice"
+*CloseUI: *PageSize
+
+*OpenUI *PageRegion: PickOne
+*DefaultPageRegion: A4
+*PageRegion A4/A4: "<</PageSize [595 842] /ImagingBBox null>> setpagedevice"
+*PageRegion Letter/US Letter: "<</PageSize [612 792] /ImagingBBox null>> setpagedevice"
+*CloseUI: *PageRegion
+
+*DefaultImageableArea: A4
+*ImageableArea A4/A4: "0 0 595 842"
+*ImageableArea Letter/US Letter: "0 0 612 792"
+
+*DefaultPaperDimension: A4
+*PaperDimension A4/A4: "595 842"
+*PaperDimension Letter/US Letter: "612 792"
+
+*% ---- Resolution -----------------------------------------------------
+*OpenUI *Resolution/Output Resolution: PickOne
+*DefaultResolution: 600dpi
+*Resolution 300dpi/300 DPI: "<</HWResolution [300 300]>> setpagedevice"
+*Resolution 600dpi/600 DPI: "<</HWResolution [600 600]>> setpagedevice"
+*CloseUI: *Resolution
+
+*% EOF
