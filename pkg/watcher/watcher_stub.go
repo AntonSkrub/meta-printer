@@ -12,8 +12,10 @@ var ErrNotSupported = errors.New("watcher: inotify is only available on Linux")
 
 // Event represents a file-open detection.
 type Event struct {
-	Name string
-	Path string
+	Name     string
+	Path     string
+	DeviceID uint64
+	InodeNum uint64
 }
 
 // Watcher is a no-op implementation for non-Linux platforms.

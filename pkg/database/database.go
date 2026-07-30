@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
@@ -18,6 +19,8 @@ type FileMetadata struct {
 	Filename  string
 	Filepath  string
 	FileHash  string
+	DeviceID  uint64
+	InodeNum  uint64
 	OpenedAt  time.Time
 	PrintedAt *time.Time
 }
@@ -61,6 +64,8 @@ func (s *Store) migrate() error {
 			filename    TEXT     NOT NULL,
 			filepath    TEXT     NOT NULL,
 			file_hash   TEXT,
+			dev_id      TEXT,
+			inode_num   TEXT,
 			opened_at   DATETIME NOT NULL,
 			printed_at  DATETIME
 		);
@@ -81,9 +86,36 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	hasDevID, err := s.columnExists("file_metadata", "dev_id")
+	if err != nil {
+		return err
+	}
+	if !hasDevID {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN dev_id TEXT`); err != nil {
+			return err
+		}
+	}
+
+	hasInodeNum, err := s.columnExists("file_metadata", "inode_num")
+	if err != nil {
+		return err
+	}
+	if !hasInodeNum {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN inode_num TEXT`); err != nil {
+			return err
+		}
+	}
+
 	if _, err := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_file_hash
 			ON file_metadata (file_hash, opened_at DESC)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_dev_inode
+			ON file_metadata (dev_id, inode_num, opened_at DESC)
 	`); err != nil {
 		return err
 	}
@@ -92,14 +124,25 @@ func (s *Store) migrate() error {
 }
 
 // RecordOpen stores metadata for a file that was just opened.
-func (s *Store) RecordOpen(filename, filePath, fileHash string) error {
+func (s *Store) RecordOpen(filename, filePath, fileHash string, deviceID, inodeNum uint64) error {
 	var hashValue any
 	if fileHash != "" {
 		hashValue = fileHash
 	}
+
+	var devValue any
+	if deviceID != 0 {
+		devValue = strconv.FormatUint(deviceID, 10)
+	}
+
+	var inodeValue any
+	if inodeNum != 0 {
+		inodeValue = strconv.FormatUint(inodeNum, 10)
+	}
+
 	_, err := s.db.Exec(
-		`INSERT INTO file_metadata (filename, filepath, file_hash, opened_at) VALUES (?, ?, ?, ?)`,
-		filename, filePath, hashValue, time.Now().UTC(),
+		`INSERT INTO file_metadata (filename, filepath, file_hash, dev_id, inode_num, opened_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		filename, filePath, hashValue, devValue, inodeValue, time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("db: record open: %w", err)
@@ -107,11 +150,24 @@ func (s *Store) RecordOpen(filename, filePath, fileHash string) error {
 	return nil
 }
 
+// LookupByDevInode returns the most-recently-opened record matching device and inode.
+// Returns sql.ErrNoRows if no match is found.
+func (s *Store) LookupByDevInode(deviceID, inodeNum uint64) (*FileMetadata, error) {
+	row := s.db.QueryRow(`
+		SELECT id, filename, filepath, file_hash, dev_id, inode_num, opened_at, printed_at
+		FROM file_metadata
+		WHERE dev_id = ? AND inode_num = ?
+		ORDER BY opened_at DESC
+		LIMIT 1
+	`, strconv.FormatUint(deviceID, 10), strconv.FormatUint(inodeNum, 10))
+	return scanRow(row)
+}
+
 // LookupByFileHash returns the most-recently-opened record matching fileHash.
 // Returns sql.ErrNoRows if no match is found.
 func (s *Store) LookupByFileHash(fileHash string) (*FileMetadata, error) {
 	row := s.db.QueryRow(`
-		SELECT id, filename, filepath, file_hash, opened_at, printed_at
+		SELECT id, filename, filepath, file_hash, dev_id, inode_num, opened_at, printed_at
 		FROM file_metadata
 		WHERE file_hash = ?
 		ORDER BY opened_at DESC
@@ -124,7 +180,7 @@ func (s *Store) LookupByFileHash(fileHash string) (*FileMetadata, error) {
 // Returns sql.ErrNoRows if no match is found.
 func (s *Store) LookupByFilename(filename string) (*FileMetadata, error) {
 	row := s.db.QueryRow(`
-		SELECT id, filename, filepath, file_hash, opened_at, printed_at
+		SELECT id, filename, filepath, file_hash, dev_id, inode_num, opened_at, printed_at
 		FROM file_metadata
 		WHERE filename = ?
 		ORDER BY opened_at DESC
@@ -153,12 +209,24 @@ func (s *Store) Close() error {
 func scanRow(row *sql.Row) (*FileMetadata, error) {
 	var m FileMetadata
 	var fileHash sql.NullString
+	var deviceID sql.NullString
+	var inodeNum sql.NullString
 	var printedAt sql.NullTime
-	if err := row.Scan(&m.ID, &m.Filename, &m.Filepath, &fileHash, &m.OpenedAt, &printedAt); err != nil {
+	if err := row.Scan(&m.ID, &m.Filename, &m.Filepath, &fileHash, &deviceID, &inodeNum, &m.OpenedAt, &printedAt); err != nil {
 		return nil, err
 	}
 	if fileHash.Valid {
 		m.FileHash = fileHash.String
+	}
+	if deviceID.Valid {
+		if value, err := strconv.ParseUint(deviceID.String, 10, 64); err == nil {
+			m.DeviceID = value
+		}
+	}
+	if inodeNum.Valid {
+		if value, err := strconv.ParseUint(inodeNum.String, 10, 64); err == nil {
+			m.InodeNum = value
+		}
 	}
 	if printedAt.Valid {
 		m.PrintedAt = &printedAt.Time

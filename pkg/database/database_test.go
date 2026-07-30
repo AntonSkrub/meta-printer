@@ -22,7 +22,7 @@ func newTestStore(t *testing.T) *Store {
 func TestRecordAndLookup(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("report.pdf", "/home/user/docs/report.pdf", ""); err != nil {
+	if err := s.RecordOpen("report.pdf", "/home/user/docs/report.pdf", "", 0, 0); err != nil {
 		t.Fatalf("RecordOpen: %v", err)
 	}
 
@@ -45,12 +45,12 @@ func TestRecordAndLookup(t *testing.T) {
 func TestLookupReturnsLatest(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("doc.txt", "/old/doc.txt", ""); err != nil {
+	if err := s.RecordOpen("doc.txt", "/old/doc.txt", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	// Ensure the second record has a strictly later timestamp.
 	time.Sleep(2 * time.Millisecond)
-	if err := s.RecordOpen("doc.txt", "/new/doc.txt", ""); err != nil {
+	if err := s.RecordOpen("doc.txt", "/new/doc.txt", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -66,7 +66,7 @@ func TestLookupReturnsLatest(t *testing.T) {
 func TestMarkPrinted(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("file.docx", "/tmp/file.docx", ""); err != nil {
+	if err := s.RecordOpen("file.docx", "/tmp/file.docx", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	m, err := s.LookupByFilename("file.docx")
@@ -98,10 +98,10 @@ func TestLookupMissing(t *testing.T) {
 func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-desktop"); err != nil {
+	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-desktop", 2050, 382174); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-documents"); err != nil {
+	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-documents", 2050, 445192); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,6 +127,32 @@ func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
 	}
 	if m.Filepath != "/home/user/documents/invoice.pdf" {
 		t.Errorf("expected latest filename match, got %q", m.Filepath)
+	}
+}
+
+func TestLookupByDevInode(t *testing.T) {
+	s := newTestStore(t)
+
+	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-open", 2050, 382174); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-edited", 2050, 382174); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := s.LookupByDevInode(2050, 382174)
+	if err != nil {
+		t.Fatalf("LookupByDevInode: %v", err)
+	}
+
+	if m.Filepath != "/home/user/documents/invoice.pdf" {
+		t.Errorf("expected latest inode/dev match, got %q", m.Filepath)
+	}
+	if m.DeviceID != 2050 {
+		t.Errorf("expected device id 2050, got %d", m.DeviceID)
+	}
+	if m.InodeNum != 382174 {
+		t.Errorf("expected inode 382174, got %d", m.InodeNum)
 	}
 }
 

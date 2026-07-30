@@ -143,6 +143,18 @@ func buildMetadata(user, title, sourcePath string) *filter.Metadata {
 	defer store.Close()
 
 	if sourcePath != "" {
+		if deviceID, inodeNum, err := statIdentity(sourcePath); err != nil {
+			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: stat input")
+		} else if record, err := store.LookupByDevInode(deviceID, inodeNum); err == nil {
+			meta.Filepath = record.Filepath
+			if err := store.MarkPrinted(record.ID); err != nil {
+				log.Error().Err(err).Msg("metafilter: mark printed")
+			}
+			return meta
+		} else if err != sql.ErrNoRows {
+			log.Error().Err(err).Msg("metafilter: db inode lookup")
+		}
+
 		hash, err := hashFile(sourcePath)
 		if err != nil {
 			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: hash input")

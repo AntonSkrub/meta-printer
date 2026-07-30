@@ -114,7 +114,7 @@ func main() {
 				log.Warn().Err(err).Str("path", ev.Path).Msg("metad: hash file")
 			}
 
-			if err := store.RecordOpen(ev.Name, ev.Path, hash); err != nil {
+			if err := store.RecordOpen(ev.Name, ev.Path, hash, ev.DeviceID, ev.InodeNum); err != nil {
 				log.Error().Err(err).Str("path", ev.Path).Msg("metad: record open")
 			} else {
 				log.Debug().Str("path", ev.Path).Msg("metad: recorded")
