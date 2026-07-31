@@ -14,7 +14,7 @@
 #                    file:///dev/null               (discard – for testing)
 #   --printer-name Name for the CUPS printer queue. Default: MetaPrinter
 #
-# Requires: cups, make, go (for building).
+# Requires: cups, make and go are only needed when prebuilt binaries are absent.
 
 set -euo pipefail
 
@@ -33,15 +33,30 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ---------- build binaries --------------------------------------------
-echo "==> Building meta-printer binaries…"
-(cd "${REPO_ROOT}" && make build)
+# ---------- resolve binaries (prefer prebuilt) --------------------------------
+METAD_BIN="${REPO_ROOT}/bin/metad"
+METAFILTER_BIN="${REPO_ROOT}/bin/metafilter"
+
+if [[ -x "${METAD_BIN}" && -x "${METAFILTER_BIN}" ]]; then
+    echo "==> Using prebuilt binaries in ${REPO_ROOT}/bin"
+else
+    echo "==> Prebuilt binaries not found – building from source..."
+    (cd "${REPO_ROOT}" && make build)
+fi
+
+# Verify binaries exist after prebuilt-or-build path.
+if [[ ! -x "${METAD_BIN}" || ! -x "${METAFILTER_BIN}" ]]; then
+    echo "Error: required binaries are missing:"
+    echo "  ${METAD_BIN}"
+    echo "  ${METAFILTER_BIN}"
+    exit 1
+fi
 
 # ---------- install CUPS filter ---------------------------------------
 FILTER_DIR="/usr/lib/cups/filter"
 echo "==> Installing CUPS filter to ${FILTER_DIR}/metafilter"
 sudo install -o root -g root -m 0755 \
-    "${REPO_ROOT}/bin/metafilter" "${FILTER_DIR}/metafilter"
+    "${METAFILTER_BIN}" "${FILTER_DIR}/metafilter"
 
 # ---------- install PPD -----------------------------------------------
 PPD_DIR="/usr/share/ppd/meta-printer"
@@ -85,7 +100,7 @@ install -m 0644 \
 
 # Install the daemon binary system-wide so the service can find it.
 sudo install -o root -g root -m 0755 \
-    "${REPO_ROOT}/bin/metad" "/usr/local/bin/metad"
+    "${METAD_BIN}" "/usr/local/bin/metad"
 
 echo "==> Enabling and starting metad service"
 systemctl --user daemon-reload
