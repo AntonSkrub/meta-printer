@@ -33,7 +33,7 @@ type Store struct {
 // New opens (or creates) the SQLite database at path, creating any parent
 // directories as needed, and runs the schema migration.
 func New(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("db: create parent directory: %w", err)
 	}
 

@@ -10,7 +10,7 @@ import (
 func TestDefaultWatchDirs_FindsExistingDirs(t *testing.T) {
 	home := t.TempDir()
 	for _, dir := range []string{"Documents", "Downloads", "Desktop"} {
-		if err := os.Mkdir(filepath.Join(home, dir), 0o755); err != nil {
+		if err := os.Mkdir(filepath.Join(home, dir), 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}

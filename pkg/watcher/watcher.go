@@ -98,6 +98,8 @@ func (w *Watcher) readEvents() {
 
 		offset := 0
 		for offset+unix.SizeofInotifyEvent <= n {
+			// #nosec G103 -- Safe: the buffer bounds are verified before casting to
+			// unix.InotifyEvent, matching the Linux inotify event layout
 			raw := (*unix.InotifyEvent)(unsafe.Pointer(&buf[offset]))
 			mask := raw.Mask
 			nameLen := int(raw.Len)

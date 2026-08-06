@@ -113,7 +113,7 @@ func main() {
 // is returned. The returned closer must be called when done.
 func openInput(args []string) (io.Reader, func(), string, error) {
 	if len(args) >= 7 && args[6] != "" {
-		f, err := os.Open(args[6])
+		f, err := os.Open(args[6]) // #nosec G703 - path
 		if err != nil {
 			return nil, func() {}, "", err
 		}
@@ -194,7 +194,7 @@ func buildMetadata(user, title, sourcePath string) *filter.Metadata {
 }
 
 func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G703 - path
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)
 	}

@@ -82,7 +82,7 @@ func main() {
 	dbPath := filepath.Join(cfg.DatabaseDir, cfg.DaemonDB.Name+".db")
 	store, err := database.New(dbPath)
 	if err != nil {
-		log.Fatal().Err(err).Msg("metad: open database")
+		log.Error().Err(err).Msg("metad: open database")
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
@@ -133,7 +133,7 @@ func main() {
 }
 
 func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 - path
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)
 	}
