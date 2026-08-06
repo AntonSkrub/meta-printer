@@ -92,7 +92,7 @@ func main() {
 
 	w, err := watcher.New()
 	if err != nil {
-		log.Fatal().Err(err).Msg("metad: create watcher")
+		log.Error().Err(err).Msg("metad: create watcher")
 	}
 	defer w.Stop()
 

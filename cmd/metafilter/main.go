@@ -80,7 +80,8 @@ func main() {
 	// CUPS passes exactly 5 or 6 positional arguments (plus argv[0]).
 	if len(os.Args) < 6 {
 		log.Info().Msg("Usage: metafilter job-id user title copies options [filename]")
-		os.Exit(1)
+		log.Error().Msgf("metafilter: expected 5 or 6 arguments, got %d", len(os.Args)-1)
+		os.Exit(0)
 	}
 
 	// argv[1] job-id, argv[2] user, argv[3] title, argv[4] copies,
