@@ -44,13 +44,17 @@ func New(path string) (*Store, error) {
 
 	// Single-writer SQLite; enable WAL for better concurrency.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		db.Close()
+		if err = db.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close: %v\n", err)
+		}
 		return nil, fmt.Errorf("db: enable WAL: %w", err)
 	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		if err = s.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close: %v\n", err)
+		}
 		return nil, fmt.Errorf("db: migrate: %w", err)
 	}
 	return s, nil
@@ -239,7 +243,11 @@ func (s *Store) columnExists(tableName, columnName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close rows: %v\n", err)
+		}
+	}()
 
 	for rows.Next() {
 		var cid int

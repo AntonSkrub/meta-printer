@@ -84,7 +84,11 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("metad: open database")
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			log.Error().Err(err).Msg("metad: close database")
+		}
+	}()
 
 	w, err := watcher.New()
 	if err != nil {
@@ -133,7 +137,11 @@ func hashFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Error().Err(err).Str("path", path).Msg("metad: close file")
+		}
+	}()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

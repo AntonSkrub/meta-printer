@@ -117,7 +117,11 @@ func openInput(args []string) (io.Reader, func(), string, error) {
 		if err != nil {
 			return nil, func() {}, "", err
 		}
-		return f, func() { f.Close() }, args[6], nil
+		return f, func() {
+			if err := f.Close(); err != nil {
+				log.Error().Err(err).Str("path", args[6]).Msg("metafilter: close input file")
+			}
+		}, args[6], nil
 	}
 	return os.Stdin, func() {}, "", nil
 }
@@ -140,7 +144,11 @@ func buildMetadata(user, title, sourcePath string) *filter.Metadata {
 		// Database not available – use job-title metadata only.
 		return meta
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			log.Error().Err(err).Msg("metafilter: close database")
+		}
+	}()
 
 	if sourcePath != "" {
 		if deviceID, inodeNum, err := statIdentity(sourcePath); err != nil {
@@ -190,7 +198,11 @@ func hashFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Error().Err(err).Str("path", path).Msg("metafilter: close file")
+		}
+	}()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

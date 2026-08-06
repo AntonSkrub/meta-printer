@@ -99,7 +99,6 @@ echo "==> Enabling and accepting jobs for '${PRINTER_NAME}'"
 sudo cupsenable "${PRINTER_NAME}"
 sudo cupsaccept "${PRINTER_NAME}"
 
-
 # ---------- install & start systemd user service ----------------------
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 echo "==> Installing systemd user service to ${SYSTEMD_USER_DIR}/metad.service"

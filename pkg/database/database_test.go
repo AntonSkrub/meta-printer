@@ -15,7 +15,11 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 	return s
 }
 
@@ -164,7 +168,10 @@ func TestNew_CreatesDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	s.Close()
+	err = s.Close()
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("database file not created: %v", err)
