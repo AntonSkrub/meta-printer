@@ -60,73 +60,6 @@ func New(path string) (*Store, error) {
 	return s, nil
 }
 
-// migrate creates the schema if it does not already exist.
-func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS file_metadata (
-			id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-			filename    TEXT     NOT NULL,
-			filepath    TEXT     NOT NULL,
-			file_hash   TEXT,
-			dev_id      TEXT,
-			inode_num   TEXT,
-			opened_at   DATETIME NOT NULL,
-			printed_at  DATETIME
-		);
-		CREATE INDEX IF NOT EXISTS idx_filename
-			ON file_metadata (filename, opened_at DESC);
-	`)
-	if err != nil {
-		return err
-	}
-
-	hasHash, err := s.columnExists("file_metadata", "file_hash")
-	if err != nil {
-		return err
-	}
-	if !hasHash {
-		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN file_hash TEXT`); err != nil {
-			return err
-		}
-	}
-
-	hasDevID, err := s.columnExists("file_metadata", "dev_id")
-	if err != nil {
-		return err
-	}
-	if !hasDevID {
-		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN dev_id TEXT`); err != nil {
-			return err
-		}
-	}
-
-	hasInodeNum, err := s.columnExists("file_metadata", "inode_num")
-	if err != nil {
-		return err
-	}
-	if !hasInodeNum {
-		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN inode_num TEXT`); err != nil {
-			return err
-		}
-	}
-
-	if _, err := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_file_hash
-			ON file_metadata (file_hash, opened_at DESC)
-	`); err != nil {
-		return err
-	}
-
-	if _, err := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_dev_inode
-			ON file_metadata (dev_id, inode_num, opened_at DESC)
-	`); err != nil {
-		return err
-	}
-
-	return err
-}
-
 // RecordOpen stores metadata for a file that was just opened.
 func (s *Store) RecordOpen(filename, filePath, fileHash string, deviceID, inodeNum uint64) error {
 	var hashValue any
@@ -208,6 +141,73 @@ func (s *Store) MarkPrinted(id int64) error {
 // Close releases all database resources.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// migrate creates the schema if it does not already exist.
+func (s *Store) migrate() error {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS file_metadata (
+			id          INTEGER  PRIMARY KEY AUTOINCREMENT,
+			filename    TEXT     NOT NULL,
+			filepath    TEXT     NOT NULL,
+			file_hash   TEXT,
+			dev_id      TEXT,
+			inode_num   TEXT,
+			opened_at   DATETIME NOT NULL,
+			printed_at  DATETIME
+		);
+		CREATE INDEX IF NOT EXISTS idx_filename
+			ON file_metadata (filename, opened_at DESC);
+	`)
+	if err != nil {
+		return err
+	}
+
+	hasHash, err := s.columnExists("file_metadata", "file_hash")
+	if err != nil {
+		return err
+	}
+	if !hasHash {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN file_hash TEXT`); err != nil {
+			return err
+		}
+	}
+
+	hasDevID, err := s.columnExists("file_metadata", "dev_id")
+	if err != nil {
+		return err
+	}
+	if !hasDevID {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN dev_id TEXT`); err != nil {
+			return err
+		}
+	}
+
+	hasInodeNum, err := s.columnExists("file_metadata", "inode_num")
+	if err != nil {
+		return err
+	}
+	if !hasInodeNum {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN inode_num TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_file_hash
+			ON file_metadata (file_hash, opened_at DESC)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_dev_inode
+			ON file_metadata (dev_id, inode_num, opened_at DESC)
+	`); err != nil {
+		return err
+	}
+
+	return err
 }
 
 func scanRow(row *sql.Row) (*FileMetadata, error) {
