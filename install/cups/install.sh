@@ -28,17 +28,17 @@ BACKEND_URI="cups-pdf:/"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--backend-uri)
-			BACKEND_URI="$2"
-			shift 2
-			;;
+		BACKEND_URI="$2"
+		shift 2
+		;;
 	--printer-name)
-			PRINTER_NAME="$2"
-			shift 2
-			;;
+		PRINTER_NAME="$2"
+		shift 2
+		;;
 	*)
-			echo "Unknown argument: $1" >&2
-			exit 1
-			;;
+		echo "Unknown argument: $1" >&2
+		exit 1
+		;;
 	esac
 done
 
@@ -96,8 +96,9 @@ sudo lpadmin \
 	-L "Virtual CUPS printer – prepends document metadata"
 
 echo "==> Enabling and accepting jobs for '${PRINTER_NAME}'"
-sudo cupsenable  "${PRINTER_NAME}"
-sudo cupsaccept  "${PRINTER_NAME}"
+sudo cupsenable "${PRINTER_NAME}"
+sudo cupsaccept "${PRINTER_NAME}"
+
 
 # ---------- install & start systemd user service ----------------------
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
