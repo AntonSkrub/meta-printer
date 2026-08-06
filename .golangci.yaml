@@ -4,6 +4,11 @@ run:
 
 linters:
   default: all
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosmopolitan
   disable:
 
     # too annoying
