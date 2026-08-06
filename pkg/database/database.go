@@ -1,6 +1,7 @@
+package database
+
 // Package db provides a SQLite-backed store for file-open metadata collected
 // by the metadata daemon and consumed by the CUPS print filter.
-package database
 
 import (
 	"database/sql"
