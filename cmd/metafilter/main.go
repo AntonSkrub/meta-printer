@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -98,7 +99,7 @@ func main() {
 	}
 	defer closeInput()
 
-	meta := buildMetadata(title, sourcePath)
+	meta := buildMetadata(title, input, sourcePath)
 
 	// Determine content type from the CUPS environment variable.
 	contentType := os.Getenv("CONTENT_TYPE")
@@ -117,7 +118,11 @@ func main() {
 // is returned. The returned closer must be called when done.
 func openInput(args []string) (io.Reader, func(), string, error) {
 	if len(args) >= 7 && args[6] != "" {
-		f, err := os.Open(args[6]) // #nosec G304 G703 -- path is resolved from CUPS/db metadata in this flow
+		if err := validateInputPath(args[6]); err != nil {
+			return nil, func() {}, "", err
+		}
+
+		f, err := os.Open(args[6]) // #nosec G304 -- validated CUPS spool path via validateInputPath
 		if err != nil {
 			return nil, func() {}, "", err
 		}
@@ -130,11 +135,35 @@ func openInput(args []string) (io.Reader, func(), string, error) {
 	return os.Stdin, func() {}, "", nil
 }
 
+// validateInputPath constrains user-controlled path input to expected CUPS spool
+// file locations and disallows traversal/symlink escapes.
+func validateInputPath(path string) error {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return fmt.Errorf("input path must be absolute: %q", path)
+	}
+
+	const cupsSpoolPrefix = "/var/spool/cups/"
+	if !strings.HasPrefix(clean, cupsSpoolPrefix) {
+		return fmt.Errorf("input path must be inside %s: %q", cupsSpoolPrefix, path)
+	}
+
+	resolved, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return fmt.Errorf("resolve input path symlinks: %w", err)
+	}
+	if !strings.HasPrefix(resolved, cupsSpoolPrefix) {
+		return fmt.Errorf("input path resolves outside %s: %q", cupsSpoolPrefix, resolved)
+	}
+
+	return nil
+}
+
 // buildMetadata constructs the Metadata struct for a print job.
 // It first tries to look up the original file path from the daemon's database;
 // if that fails (db unavailable or no matching record) it falls back to
 // using the job title as both filename and path.
-func buildMetadata(title, sourcePath string) *filter.Metadata {
+func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Metadata {
 	meta := &filter.Metadata{
 		Filename:  filepath.Base(title),
 		Filepath:  title,
@@ -155,6 +184,19 @@ func buildMetadata(title, sourcePath string) *filter.Metadata {
 	}()
 
 	if sourcePath != "" {
+		sourceHash := ""
+		if rs, ok := input.(io.ReadSeeker); ok {
+			if b, err := io.ReadAll(rs); err != nil {
+				log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: read input for hash")
+			} else {
+				sourceHash = hashBytes(b)
+			}
+			if _, err := rs.Seek(0, io.SeekStart); err != nil {
+				log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: rewind input after hash")
+				sourceHash = ""
+			}
+		}
+
 		if deviceID, inodeNum, err := statIdentity(sourcePath); err != nil {
 			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: stat input")
 		} else if record, err := store.LookupByDevInode(deviceID, inodeNum); err == nil {
@@ -167,17 +209,16 @@ func buildMetadata(title, sourcePath string) *filter.Metadata {
 			log.Error().Err(err).Msg("metafilter: db inode lookup")
 		}
 
-		hash, err := hashFile(sourcePath)
-		if err != nil {
-			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: hash input")
-		} else if record, err := store.LookupByFileHash(hash); err == nil {
-			meta.Filepath = record.Filepath
-			if err := store.MarkPrinted(record.ID); err != nil {
-				log.Error().Err(err).Msg("metafilter: mark printed")
+		if sourceHash != "" {
+			if record, err := store.LookupByFileHash(sourceHash); err == nil {
+				meta.Filepath = record.Filepath
+				if err := store.MarkPrinted(record.ID); err != nil {
+					log.Error().Err(err).Msg("metafilter: mark printed")
+				}
+				return meta
+			} else if err != sql.ErrNoRows {
+				log.Error().Err(err).Msg("metafilter: db hash lookup")
 			}
-			return meta
-		} else if err != sql.ErrNoRows {
-			log.Error().Err(err).Msg("metafilter: db hash lookup")
 		}
 	}
 
@@ -197,20 +238,8 @@ func buildMetadata(title, sourcePath string) *filter.Metadata {
 	return meta
 }
 
-func hashFile(path string) (string, error) {
-	f, err := os.Open(path) // #nosec G703 -- path
-	if err != nil {
-		return "", fmt.Errorf("open: %w", err)
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.Error().Err(err).Str("path", path).Msg("metafilter: close file")
-		}
-	}()
-
+func hashBytes(data []byte) string {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("hash: %w", err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	_, _ = h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
 }
