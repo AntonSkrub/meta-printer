@@ -18,6 +18,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -147,5 +148,5 @@ func hashFile(path string) (string, error) {
 	if _, err := io.Copy(h, f); err != nil {
 		return "", fmt.Errorf("hash: %w", err)
 	}
-	return fmt.Sprintf("%x", h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

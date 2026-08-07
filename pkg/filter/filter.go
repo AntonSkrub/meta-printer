@@ -9,7 +9,6 @@
 package filter
 
 import (
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -48,9 +47,9 @@ func headerLines(m *Metadata) []string {
 		"========================================",
 		"  Document Metadata",
 		"========================================",
-		fmt.Sprintf("  Filename : %s", m.Filename),
-		fmt.Sprintf("  Path     : %s", m.Filepath),
-		fmt.Sprintf("  Printed  : %s", m.PrintTime.Format("2006-01-02 15:04:05 MST")),
+		"  Filename : " + m.Filename,
+		"  Path     : " + m.Filepath,
+		"  Printed  : " + m.PrintTime.Format("2006-01-02 15:04:05 MST"),
 		"========================================",
 		"",
 	}

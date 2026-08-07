@@ -38,8 +38,7 @@ func buildPSCoverPage(m *Metadata) string {
 			y -= 10
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("50 %d moveto (%s) show\n", y, psEscapeString(l)))
-
+		fmt.Fprintf(&sb, "50 %d moveto (%s) show\n", y, psEscapeString(l))
 		y -= 20
 	}
 	sb.WriteString("showpage\n")
