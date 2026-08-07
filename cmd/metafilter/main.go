@@ -9,7 +9,7 @@
 // is used. The processed document is written to stdout.
 //
 // The filter looks up richer metadata (original file path) from the metadata
-// daemon's SQLite database at /var/lib/meta-printer/<user>.db, falling back
+// daemon's SQLite database at /var/lib/meta-printer/<config.Get().DaemonDB.Name>.db, falling back
 // gracefully to the job title when the database is unavailable.
 //
 // The CONTENT_TYPE environment variable (set by CUPS) determines the output
@@ -81,12 +81,12 @@ func main() {
 	if len(os.Args) < 6 {
 		log.Info().Msg("Usage: metafilter job-id user title copies options [filename]")
 		log.Error().Msgf("metafilter: expected 5 or 6 arguments, got %d", len(os.Args)-1)
-		os.Exit(0)
+		return
 	}
 
 	// argv[1] job-id, argv[2] user, argv[3] title, argv[4] copies,
 	// argv[5] options, argv[6] (optional) filename.
-	user := os.Args[2]
+	// user := os.Args[2]
 	title := os.Args[3]
 
 	// Open input: file argument takes precedence over stdin.
@@ -96,7 +96,7 @@ func main() {
 	}
 	defer closeInput()
 
-	meta := buildMetadata(user, title, sourcePath)
+	meta := buildMetadata(title, sourcePath)
 
 	// Determine content type from the CUPS environment variable.
 	contentType := os.Getenv("CONTENT_TYPE")
@@ -114,7 +114,7 @@ func main() {
 // is returned. The returned closer must be called when done.
 func openInput(args []string) (io.Reader, func(), string, error) {
 	if len(args) >= 7 && args[6] != "" {
-		f, err := os.Open(args[6]) // #nosec G703 - path
+		f, err := os.Open(args[6]) // #nosec G304 -- path is resolved from CUPS/db metadata in this flow
 		if err != nil {
 			return nil, func() {}, "", err
 		}
@@ -131,7 +131,7 @@ func openInput(args []string) (io.Reader, func(), string, error) {
 // It first tries to look up the original file path from the daemon's database;
 // if that fails (db unavailable or no matching record) it falls back to
 // using the job title as both filename and path.
-func buildMetadata(user, title, sourcePath string) *filter.Metadata {
+func buildMetadata(title, sourcePath string) *filter.Metadata {
 	meta := &filter.Metadata{
 		Filename:  filepath.Base(title),
 		Filepath:  title,
@@ -195,7 +195,7 @@ func buildMetadata(user, title, sourcePath string) *filter.Metadata {
 }
 
 func hashFile(path string) (string, error) {
-	f, err := os.Open(path) // #nosec G703 - path
+	f, err := os.Open(path) // #nosec G304 -- path is resolved from CUPS/db metadata in this flow
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)
 	}

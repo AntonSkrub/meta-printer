@@ -45,11 +45,11 @@ func TestPDFString_NonASCII(t *testing.T) {
 		t.Errorf("expected octal escape for é, got %q", got)
 	}
 	// Characters outside Latin-1 must be replaced with '_'.
-	got2 := pdfString("日本語")
+	got2 := pdfString("日本語") //nolint:gosmopolitan // Intentional Japanese test data.
 	if !strings.HasPrefix(got2, "(") || !strings.HasSuffix(got2, ")") {
 		t.Errorf("expected PDF string literal, got %q", got2)
 	}
-	if strings.Contains(got2, "日") {
+	if strings.Contains(got2, "日") { //nolint:gosmopolitan // Intentional Unicode test character.
 		t.Errorf("expected non-representable chars to be replaced, got %q", got2)
 	}
 }
@@ -66,10 +66,8 @@ func TestBuildContentStream_ContainsMetadata(t *testing.T) {
 }
 
 func TestBuildCoverPagePDF_ValidHeader(t *testing.T) {
-	data, err := buildCoverPagePDF(testMeta)
-	if err != nil {
-		t.Fatalf("buildCoverPagePDF: %v", err)
-	}
+	data := buildCoverPagePDF(testMeta)
+
 	if !bytes.HasPrefix(data, []byte("%PDF-")) {
 		t.Error("output does not start with %PDF-")
 	}
@@ -137,10 +135,7 @@ func TestPrepend_PSType(t *testing.T) {
 func TestPrepend_PDFType(t *testing.T) {
 	// Use our own cover-page PDF as a stand-in for the "original document"
 	// so we don't need an external file.
-	original, err := buildCoverPagePDF(testMeta)
-	if err != nil {
-		t.Fatalf("buildCoverPagePDF (original): %v", err)
-	}
+	original := buildCoverPagePDF(testMeta)
 
 	var out bytes.Buffer
 	if err := Prepend("application/pdf", testMeta, bytes.NewReader(original), &out); err != nil {

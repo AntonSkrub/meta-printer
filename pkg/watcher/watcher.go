@@ -61,7 +61,7 @@ func (w *Watcher) Add(path string) error {
 	if err != nil {
 		return err
 	}
-	w.wds[int(wd)] = path
+	w.wds[wd] = path
 	return nil
 }
 
@@ -153,5 +153,5 @@ func statIdentity(path string) (uint64, uint64, error) {
 		return 0, 0, err
 	}
 
-	return uint64(stat.Dev), stat.Ino, nil
+	return stat.Dev, stat.Ino, nil
 }
