@@ -92,7 +92,8 @@ func main() {
 	// Open input: file argument takes precedence over stdin.
 	input, closeInput, sourcePath, err := openInput(os.Args)
 	if err != nil {
-		log.Fatal().Err(err).Msg("metafilter: open input")
+		log.Error().Err(err).Msg("metafilter: open input")
+		return
 	}
 	defer closeInput()
 
@@ -105,7 +106,8 @@ func main() {
 	}
 
 	if err := filter.Prepend(contentType, meta, input, os.Stdout); err != nil {
-		log.Fatal().Err(err).Msg("metafilter: prepend metadata")
+		log.Error().Err(err).Msg("metafilter: prepend metadata")
+		return
 	}
 }
 
@@ -114,7 +116,7 @@ func main() {
 // is returned. The returned closer must be called when done.
 func openInput(args []string) (io.Reader, func(), string, error) {
 	if len(args) >= 7 && args[6] != "" {
-		f, err := os.Open(args[6]) // #nosec G304 -- path is resolved from CUPS/db metadata in this flow
+		f, err := os.Open(args[6]) // #nosec G304 G703 -- path is resolved from CUPS/db metadata in this flow
 		if err != nil {
 			return nil, func() {}, "", err
 		}
@@ -195,7 +197,7 @@ func buildMetadata(title, sourcePath string) *filter.Metadata {
 }
 
 func hashFile(path string) (string, error) {
-	f, err := os.Open(path) // #nosec G304 -- path is resolved from CUPS/db metadata in this flow
+	f, err := os.Open(path) // #nosec G703 -- path
 	if err != nil {
 		return "", fmt.Errorf("open: %w", err)
 	}
