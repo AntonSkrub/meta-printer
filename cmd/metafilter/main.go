@@ -27,7 +27,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -118,45 +117,50 @@ func main() {
 // is returned. The returned closer must be called when done.
 func openInput(args []string) (io.Reader, func(), string, error) {
 	if len(args) >= 7 && args[6] != "" {
-		if err := validateInputPath(args[6]); err != nil {
+		trustedPath, err := resolveTrustedCupsSpoolPath(args[6])
+		if err != nil {
 			return nil, func() {}, "", err
 		}
 
-		f, err := os.Open(args[6]) // #nosec G304 -- validated CUPS spool path via validateInputPath
+		f, err := os.Open(trustedPath)
 		if err != nil {
 			return nil, func() {}, "", err
 		}
 		return f, func() {
 			if err := f.Close(); err != nil {
-				log.Error().Err(err).Str("path", args[6]).Msg("metafilter: close input file")
+				log.Error().Err(err).Str("path", trustedPath).Msg("metafilter: close input file")
 			}
-		}, args[6], nil
+		}, trustedPath, nil
 	}
 	return os.Stdin, func() {}, "", nil
 }
 
-// validateInputPath constrains user-controlled path input to expected CUPS spool
-// file locations and disallows traversal/symlink escapes.
-func validateInputPath(path string) error {
+// resolveTrustedCupsSpoolPath maps the caller-provided CUPS filename to an
+// existing file discovered from the trusted spool directory contents.
+func resolveTrustedCupsSpoolPath(path string) (string, error) {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
-		return fmt.Errorf("input path must be absolute: %q", path)
+		return "", fmt.Errorf("input path must be absolute: %q", path)
 	}
 
-	const cupsSpoolPrefix = "/var/spool/cups/"
-	if !strings.HasPrefix(clean, cupsSpoolPrefix) {
-		return fmt.Errorf("input path must be inside %s: %q", cupsSpoolPrefix, path)
+	const cupsSpoolDir = "/var/spool/cups"
+	if filepath.Dir(clean) != cupsSpoolDir {
+		return "", fmt.Errorf("input path must be inside %s: %q", cupsSpoolDir, path)
 	}
 
-	resolved, err := filepath.EvalSymlinks(clean)
+	wanted := filepath.Base(clean)
+	entries, err := os.ReadDir(cupsSpoolDir)
 	if err != nil {
-		return fmt.Errorf("resolve input path symlinks: %w", err)
-	}
-	if !strings.HasPrefix(resolved, cupsSpoolPrefix) {
-		return fmt.Errorf("input path resolves outside %s: %q", cupsSpoolPrefix, resolved)
+		return "", fmt.Errorf("read cups spool directory: %w", err)
 	}
 
-	return nil
+	for _, entry := range entries {
+		if entry.Name() == wanted {
+			return filepath.Join(cupsSpoolDir, entry.Name()), nil
+		}
+	}
+
+	return "", fmt.Errorf("input file not found in %s: %q", cupsSpoolDir, wanted)
 }
 
 // buildMetadata constructs the Metadata struct for a print job.
