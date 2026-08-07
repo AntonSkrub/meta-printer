@@ -122,7 +122,7 @@ func openInput(args []string) (io.Reader, func(), string, error) {
 			return nil, func() {}, "", err
 		}
 
-		f, err := os.Open(trustedPath)
+		f, err := os.Open(trustedPath) // #nosec G304 -- validated CUPS spool path via validateInputPath
 		if err != nil {
 			return nil, func() {}, "", err
 		}
