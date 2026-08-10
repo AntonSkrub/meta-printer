@@ -1,3 +1,4 @@
+//nolint:testpackage // Tests cover unexported PDF/text helper functions.
 package filter
 
 import (
@@ -16,6 +17,8 @@ var testMeta = &Metadata{
 // ---- pdfString -------------------------------------------------------
 
 func TestPDFString_ASCII(t *testing.T) {
+	t.Parallel()
+
 	got := pdfString("hello world")
 	if got != "(hello world)" {
 		t.Errorf("got %q, want %q", got, "(hello world)")
@@ -23,6 +26,8 @@ func TestPDFString_ASCII(t *testing.T) {
 }
 
 func TestPDFString_EscapeParens(t *testing.T) {
+	t.Parallel()
+
 	got := pdfString("a(b)c")
 	want := `(a\(b\)c)`
 	if got != want {
@@ -31,6 +36,8 @@ func TestPDFString_EscapeParens(t *testing.T) {
 }
 
 func TestPDFString_EscapeBackslash(t *testing.T) {
+	t.Parallel()
+
 	got := pdfString(`a\b`)
 	want := `(a\\b)`
 	if got != want {
@@ -39,17 +46,19 @@ func TestPDFString_EscapeBackslash(t *testing.T) {
 }
 
 func TestPDFString_NonASCII(t *testing.T) {
+	t.Parallel()
+
 	// Characters > 0x7E and ≤ 0xFF must be octal-escaped.
 	got := pdfString("caf\u00e9") // é = U+00E9
 	if !strings.Contains(got, `\351`) {
 		t.Errorf("expected octal escape for é, got %q", got)
 	}
 	// Characters outside Latin-1 must be replaced with '_'.
-	got2 := pdfString("日本語")
+	got2 := pdfString("日本語") //nolint:gosmopolitan // Intentional Japanese test data.
 	if !strings.HasPrefix(got2, "(") || !strings.HasSuffix(got2, ")") {
 		t.Errorf("expected PDF string literal, got %q", got2)
 	}
-	if strings.Contains(got2, "日") {
+	if strings.Contains(got2, "日") { //nolint:gosmopolitan // Intentional Unicode test character.
 		t.Errorf("expected non-representable chars to be replaced, got %q", got2)
 	}
 }
@@ -57,6 +66,8 @@ func TestPDFString_NonASCII(t *testing.T) {
 // ---- buildContentStream / buildCoverPagePDF --------------------------
 
 func TestBuildContentStream_ContainsMetadata(t *testing.T) {
+	t.Parallel()
+
 	cs := buildContentStream(testMeta)
 	for _, want := range []string{"report.pdf", "/home/user", "BT", "ET"} {
 		if !strings.Contains(cs, want) {
@@ -66,10 +77,10 @@ func TestBuildContentStream_ContainsMetadata(t *testing.T) {
 }
 
 func TestBuildCoverPagePDF_ValidHeader(t *testing.T) {
-	data, err := buildCoverPagePDF(testMeta)
-	if err != nil {
-		t.Fatalf("buildCoverPagePDF: %v", err)
-	}
+	t.Parallel()
+
+	data := buildCoverPagePDF(testMeta)
+
 	if !bytes.HasPrefix(data, []byte("%PDF-")) {
 		t.Error("output does not start with %PDF-")
 	}
@@ -81,6 +92,8 @@ func TestBuildCoverPagePDF_ValidHeader(t *testing.T) {
 // ---- prependText -----------------------------------------------------
 
 func TestPrependText(t *testing.T) {
+	t.Parallel()
+
 	original := "Hello, world!\n"
 	var out bytes.Buffer
 	if err := prependText(testMeta, strings.NewReader(original), &out); err != nil {
@@ -97,6 +110,8 @@ func TestPrependText(t *testing.T) {
 // ---- prependPostScript -----------------------------------------------
 
 func TestPrependPostScript(t *testing.T) {
+	t.Parallel()
+
 	original := "%!PS-Adobe-3.0\n%%Pages: 1\n"
 	var out bytes.Buffer
 	if err := prependPostScript(testMeta, strings.NewReader(original), &out); err != nil {
@@ -114,6 +129,8 @@ func TestPrependPostScript(t *testing.T) {
 // ---- Prepend dispatcher ---------------------------------------------
 
 func TestPrepend_TextType(t *testing.T) {
+	t.Parallel()
+
 	var out bytes.Buffer
 	if err := Prepend("text/plain", testMeta, strings.NewReader("body\n"), &out); err != nil {
 		t.Fatalf("Prepend: %v", err)
@@ -124,6 +141,8 @@ func TestPrepend_TextType(t *testing.T) {
 }
 
 func TestPrepend_PSType(t *testing.T) {
+	t.Parallel()
+
 	var out bytes.Buffer
 	err := Prepend("application/postscript", testMeta, strings.NewReader("%!PS\n"), &out)
 	if err != nil {
@@ -135,12 +154,11 @@ func TestPrepend_PSType(t *testing.T) {
 }
 
 func TestPrepend_PDFType(t *testing.T) {
+	t.Parallel()
+
 	// Use our own cover-page PDF as a stand-in for the "original document"
 	// so we don't need an external file.
-	original, err := buildCoverPagePDF(testMeta)
-	if err != nil {
-		t.Fatalf("buildCoverPagePDF (original): %v", err)
-	}
+	original := buildCoverPagePDF(testMeta)
 
 	var out bytes.Buffer
 	if err := Prepend("application/pdf", testMeta, bytes.NewReader(original), &out); err != nil {
@@ -159,6 +177,8 @@ func TestPrepend_PDFType(t *testing.T) {
 }
 
 func TestPrepend_StripsMIMEParameters(t *testing.T) {
+	t.Parallel()
+
 	// MIME type with charset parameter must still route to text handler.
 	var out bytes.Buffer
 	err := Prepend("text/plain; charset=utf-8", testMeta, strings.NewReader("hi\n"), &out)

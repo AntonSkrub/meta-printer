@@ -14,7 +14,7 @@
 #                    file:///dev/null               (discard – for testing)
 #   --printer-name Name for the CUPS printer queue. Default: MetaPrinter
 #
-# Requires: cups, make, go (for building).
+# Requires: cups, make and go are only needed when prebuilt binaries are absent.
 
 set -euo pipefail
 
@@ -26,22 +26,46 @@ BACKEND_URI="cups-pdf:/"
 
 # ---------- parse arguments -------------------------------------------
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --backend-uri)  BACKEND_URI="$2";  shift 2 ;;
-        --printer-name) PRINTER_NAME="$2"; shift 2 ;;
-        *) echo "Unknown argument: $1" >&2; exit 1 ;;
-    esac
+	case "$1" in
+	--backend-uri)
+		BACKEND_URI="$2"
+		shift 2
+		;;
+	--printer-name)
+		PRINTER_NAME="$2"
+		shift 2
+		;;
+	*)
+		echo "Unknown argument: $1" >&2
+		exit 1
+		;;
+	esac
 done
 
-# ---------- build binaries --------------------------------------------
-echo "==> Building meta-printer binaries…"
-(cd "${REPO_ROOT}" && make build)
+# ---------- resolve binaries (prefer prebuilt) --------------------------------
+METAD_BIN="${REPO_ROOT}/bin/metad"
+METAFILTER_BIN="${REPO_ROOT}/bin/metafilter"
+
+if [[ -x "${METAD_BIN}" && -x "${METAFILTER_BIN}" ]]; then
+	echo "==> Using prebuilt binaries in ${REPO_ROOT}/bin"
+else
+	echo "==> Prebuilt binaries not found – building from source..."
+	(cd "${REPO_ROOT}" && make build)
+fi
+
+# Verify binaries exist after prebuilt-or-build path.
+if [[ ! -x "${METAD_BIN}" || ! -x "${METAFILTER_BIN}" ]]; then
+	echo "Error: required binaries are missing:"
+	echo "  ${METAD_BIN}"
+	echo "  ${METAFILTER_BIN}"
+	exit 1
+fi
 
 # ---------- install CUPS filter ---------------------------------------
 FILTER_DIR="/usr/lib/cups/filter"
 echo "==> Installing CUPS filter to ${FILTER_DIR}/metafilter"
 sudo install -o root -g root -m 0755 \
-    "${REPO_ROOT}/bin/metafilter" "${FILTER_DIR}/metafilter"
+	"${METAFILTER_BIN}" "${FILTER_DIR}/metafilter"
 
 # ---------- install PPD -----------------------------------------------
 PPD_DIR="/usr/share/ppd/meta-printer"
@@ -49,7 +73,7 @@ PPD_PATH="${PPD_DIR}/MetaPrinter.ppd"
 echo "==> Installing PPD to ${PPD_PATH}"
 sudo mkdir -p "${PPD_DIR}"
 sudo install -o root -g root -m 0644 \
-    "${SCRIPT_DIR}/MetaPrinter.ppd" "${PPD_PATH}"
+	"${SCRIPT_DIR}/MetaPrinter.ppd" "${PPD_PATH}"
 
 # ---------- create shared metadata directory --------------------------
 echo "==> Creating /var/lib/meta-printer (writable by lp group)"
@@ -60,32 +84,32 @@ sudo chmod 0775 /var/lib/meta-printer
 # ---------- register CUPS printer -------------------------------------
 echo "==> Registering printer '${PRINTER_NAME}' in CUPS"
 if lpstat -p "${PRINTER_NAME}" &>/dev/null; then
-    echo "    Printer already exists – removing old queue first"
-    sudo lpadmin -x "${PRINTER_NAME}"
+	echo "    Printer already exists – removing old queue first"
+	sudo lpadmin -x "${PRINTER_NAME}"
 fi
 sudo lpadmin \
-    -p "${PRINTER_NAME}" \
-    -E \
-    -v "${BACKEND_URI}" \
-    -P "${PPD_PATH}" \
-    -D "Meta Printer (metadata injection)" \
-    -L "Virtual CUPS printer – prepends document metadata"
+	-p "${PRINTER_NAME}" \
+	-E \
+	-v "${BACKEND_URI}" \
+	-P "${PPD_PATH}" \
+	-D "Meta Printer (metadata injection)" \
+	-L "Virtual CUPS printer – prepends document metadata"
 
 echo "==> Enabling and accepting jobs for '${PRINTER_NAME}'"
-sudo cupsenable  "${PRINTER_NAME}"
-sudo cupsaccept  "${PRINTER_NAME}"
+sudo cupsenable "${PRINTER_NAME}"
+sudo cupsaccept "${PRINTER_NAME}"
 
 # ---------- install & start systemd user service ----------------------
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 echo "==> Installing systemd user service to ${SYSTEMD_USER_DIR}/metad.service"
 mkdir -p "${SYSTEMD_USER_DIR}"
 install -m 0644 \
-    "${SCRIPT_DIR}/../systemd/metad.service" \
-    "${SYSTEMD_USER_DIR}/metad.service"
+	"${SCRIPT_DIR}/../systemd/metad.service" \
+	"${SYSTEMD_USER_DIR}/metad.service"
 
 # Install the daemon binary system-wide so the service can find it.
 sudo install -o root -g root -m 0755 \
-    "${REPO_ROOT}/bin/metad" "/usr/local/bin/metad"
+	"${METAD_BIN}" "/usr/local/bin/metad"
 
 echo "==> Enabling and starting metad service"
 systemctl --user daemon-reload

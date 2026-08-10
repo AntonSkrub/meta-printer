@@ -1,3 +1,4 @@
+//nolint:testpackage // Tests intentionally use package internals in this file.
 package database
 
 import (
@@ -15,11 +16,17 @@ func newTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
 	return s
 }
 
 func TestRecordAndLookup(t *testing.T) {
+	t.Parallel()
+
 	s := newTestStore(t)
 
 	if err := s.RecordOpen("report.pdf", "/home/user/docs/report.pdf", "", 0, 0); err != nil {
@@ -43,6 +50,8 @@ func TestRecordAndLookup(t *testing.T) {
 }
 
 func TestLookupReturnsLatest(t *testing.T) {
+	t.Parallel()
+
 	s := newTestStore(t)
 
 	if err := s.RecordOpen("doc.txt", "/old/doc.txt", "", 0, 0); err != nil {
@@ -64,6 +73,8 @@ func TestLookupReturnsLatest(t *testing.T) {
 }
 
 func TestMarkPrinted(t *testing.T) {
+	t.Parallel()
+
 	s := newTestStore(t)
 
 	if err := s.RecordOpen("file.docx", "/tmp/file.docx", "", 0, 0); err != nil {
@@ -88,6 +99,8 @@ func TestMarkPrinted(t *testing.T) {
 }
 
 func TestLookupMissing(t *testing.T) {
+	t.Parallel()
+
 	s := newTestStore(t)
 	_, err := s.LookupByFilename("nonexistent.pdf")
 	if err != sql.ErrNoRows {
@@ -96,6 +109,8 @@ func TestLookupMissing(t *testing.T) {
 }
 
 func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
+	t.Parallel()
+
 	s := newTestStore(t)
 
 	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-desktop", 2050, 382174); err != nil {
@@ -131,6 +146,8 @@ func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
 }
 
 func TestLookupByDevInode(t *testing.T) {
+	t.Parallel()
+
 	s := newTestStore(t)
 
 	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-open", 2050, 382174); err != nil {
@@ -157,6 +174,8 @@ func TestLookupByDevInode(t *testing.T) {
 }
 
 func TestNew_CreatesDirectory(t *testing.T) {
+	t.Parallel()
+
 	dir := filepath.Join(t.TempDir(), "nested", "subdir")
 	path := filepath.Join(dir, "meta.db")
 
@@ -164,7 +183,10 @@ func TestNew_CreatesDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	s.Close()
+	err = s.Close()
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("database file not created: %v", err)

@@ -17,10 +17,7 @@ func prependPDF(m *Metadata, r io.Reader, w io.Writer) error {
 		return fmt.Errorf("pdf: read input: %w", err)
 	}
 
-	cover, err := buildCoverPagePDF(m)
-	if err != nil {
-		return fmt.Errorf("pdf: build cover page: %w", err)
-	}
+	cover := buildCoverPagePDF(m)
 
 	coverRS := bytes.NewReader(cover)
 	originalRS := bytes.NewReader(original)
@@ -34,7 +31,7 @@ func prependPDF(m *Metadata, r io.Reader, w io.Writer) error {
 // buildCoverPagePDF creates a minimal, valid single-page PDF containing the
 // metadata lines. It uses only the standard Type1 Helvetica font (no external
 // resources required).
-func buildCoverPagePDF(m *Metadata) ([]byte, error) {
+func buildCoverPagePDF(m *Metadata) []byte {
 	content := buildContentStream(m)
 
 	var b bytes.Buffer
@@ -81,7 +78,7 @@ func buildCoverPagePDF(m *Metadata) ([]byte, error) {
 	fmt.Fprintf(&b, "trailer\n<</Size 6 /Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n",
 		xrefStart)
 
-	return b.Bytes(), nil
+	return b.Bytes()
 }
 
 // buildContentStream returns the PDF content-stream commands that render the

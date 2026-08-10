@@ -1,3 +1,4 @@
+//nolint:testpackage // Tests intentionally cover unexported config helpers.
 package config
 
 import (
@@ -8,9 +9,11 @@ import (
 )
 
 func TestDefaultWatchDirs_FindsExistingDirs(t *testing.T) {
+	t.Parallel()
+
 	home := t.TempDir()
 	for _, dir := range []string{"Documents", "Downloads", "Desktop"} {
-		if err := os.Mkdir(filepath.Join(home, dir), 0o755); err != nil {
+		if err := os.Mkdir(filepath.Join(home, dir), 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -28,12 +31,16 @@ func TestDefaultWatchDirs_FindsExistingDirs(t *testing.T) {
 }
 
 func TestDefaultWatchDirs_EmptyHome(t *testing.T) {
+	t.Parallel()
+
 	if got := defaultWatchDirs(""); got != nil {
 		t.Errorf("defaultWatchDirs: got %v, want nil", got)
 	}
 }
 
 func TestConfigValidate(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		LogLevel:    -1,
 		WatchDirs:   []string{"/tmp/watch"},
@@ -50,6 +57,8 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestConfigValidate_RejectsEmptyWatchDirs(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		LogLevel:    -1,
 		DatabaseDir: "/var/lib/meta-printer",
@@ -65,6 +74,8 @@ func TestConfigValidate_RejectsEmptyWatchDirs(t *testing.T) {
 }
 
 func TestConfigValidate_RejectsMissingDatabaseDir(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		LogLevel:  -1,
 		WatchDirs: []string{"/tmp/watch"},
@@ -80,6 +91,8 @@ func TestConfigValidate_RejectsMissingDatabaseDir(t *testing.T) {
 }
 
 func TestDatabaseConfigValidate_SQLiteRequiresName(t *testing.T) {
+	t.Parallel()
+
 	dc := DatabaseConfig{Driver: "sqlite"}
 	if err := dc.Validate(); err == nil {
 		t.Fatal("Validate should reject sqlite config without a name")
@@ -87,6 +100,8 @@ func TestDatabaseConfigValidate_SQLiteRequiresName(t *testing.T) {
 }
 
 func TestDatabaseConfigValidate_NonSQLiteRequiresConnectionFields(t *testing.T) {
+	t.Parallel()
+
 	dc := DatabaseConfig{Driver: "postgres"}
 	if err := dc.Validate(); err == nil {
 		t.Fatal("Validate should reject incomplete non-sqlite config")

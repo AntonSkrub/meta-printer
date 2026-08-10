@@ -1,6 +1,7 @@
+package database
+
 // Package db provides a SQLite-backed store for file-open metadata collected
 // by the metadata daemon and consumed by the CUPS print filter.
-package database
 
 import (
 	"database/sql"
@@ -33,7 +34,7 @@ type Store struct {
 // New opens (or creates) the SQLite database at path, creating any parent
 // directories as needed, and runs the schema migration.
 func New(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("db: create parent directory: %w", err)
 	}
 
@@ -44,83 +45,20 @@ func New(path string) (*Store, error) {
 
 	// Single-writer SQLite; enable WAL for better concurrency.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		db.Close()
+		if err = db.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close: %v\n", err)
+		}
 		return nil, fmt.Errorf("db: enable WAL: %w", err)
 	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		if err = s.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close: %v\n", err)
+		}
 		return nil, fmt.Errorf("db: migrate: %w", err)
 	}
 	return s, nil
-}
-
-// migrate creates the schema if it does not already exist.
-func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
-		CREATE TABLE IF NOT EXISTS file_metadata (
-			id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-			filename    TEXT     NOT NULL,
-			filepath    TEXT     NOT NULL,
-			file_hash   TEXT,
-			dev_id      TEXT,
-			inode_num   TEXT,
-			opened_at   DATETIME NOT NULL,
-			printed_at  DATETIME
-		);
-		CREATE INDEX IF NOT EXISTS idx_filename
-			ON file_metadata (filename, opened_at DESC);
-	`)
-	if err != nil {
-		return err
-	}
-
-	hasHash, err := s.columnExists("file_metadata", "file_hash")
-	if err != nil {
-		return err
-	}
-	if !hasHash {
-		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN file_hash TEXT`); err != nil {
-			return err
-		}
-	}
-
-	hasDevID, err := s.columnExists("file_metadata", "dev_id")
-	if err != nil {
-		return err
-	}
-	if !hasDevID {
-		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN dev_id TEXT`); err != nil {
-			return err
-		}
-	}
-
-	hasInodeNum, err := s.columnExists("file_metadata", "inode_num")
-	if err != nil {
-		return err
-	}
-	if !hasInodeNum {
-		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN inode_num TEXT`); err != nil {
-			return err
-		}
-	}
-
-	if _, err := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_file_hash
-			ON file_metadata (file_hash, opened_at DESC)
-	`); err != nil {
-		return err
-	}
-
-	if _, err := s.db.Exec(`
-		CREATE INDEX IF NOT EXISTS idx_dev_inode
-			ON file_metadata (dev_id, inode_num, opened_at DESC)
-	`); err != nil {
-		return err
-	}
-
-	return err
 }
 
 // RecordOpen stores metadata for a file that was just opened.
@@ -206,6 +144,73 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// migrate creates the schema if it does not already exist.
+func (s *Store) migrate() error {
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS file_metadata (
+			id          INTEGER  PRIMARY KEY AUTOINCREMENT,
+			filename    TEXT     NOT NULL,
+			filepath    TEXT     NOT NULL,
+			file_hash   TEXT,
+			dev_id      TEXT,
+			inode_num   TEXT,
+			opened_at   DATETIME NOT NULL,
+			printed_at  DATETIME
+		);
+		CREATE INDEX IF NOT EXISTS idx_filename
+			ON file_metadata (filename, opened_at DESC);
+	`)
+	if err != nil {
+		return err
+	}
+
+	hasHash, err := s.columnExists("file_metadata", "file_hash")
+	if err != nil {
+		return err
+	}
+	if !hasHash {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN file_hash TEXT`); err != nil {
+			return err
+		}
+	}
+
+	hasDevID, err := s.columnExists("file_metadata", "dev_id")
+	if err != nil {
+		return err
+	}
+	if !hasDevID {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN dev_id TEXT`); err != nil {
+			return err
+		}
+	}
+
+	hasInodeNum, err := s.columnExists("file_metadata", "inode_num")
+	if err != nil {
+		return err
+	}
+	if !hasInodeNum {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN inode_num TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_file_hash
+			ON file_metadata (file_hash, opened_at DESC)
+	`); err != nil {
+		return err
+	}
+
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_dev_inode
+			ON file_metadata (dev_id, inode_num, opened_at DESC)
+	`); err != nil {
+		return err
+	}
+
+	return err
+}
+
 func scanRow(row *sql.Row) (*FileMetadata, error) {
 	var m FileMetadata
 	var fileHash sql.NullString
@@ -239,7 +244,11 @@ func (s *Store) columnExists(tableName, columnName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close rows: %v\n", err)
+		}
+	}()
 
 	for rows.Next() {
 		var cid int

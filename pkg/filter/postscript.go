@@ -3,6 +3,7 @@ package filter
 import (
 	"fmt"
 	"io"
+	"strings"
 )
 
 // prependPostScript prepends a PostScript cover page containing metadata to
@@ -24,25 +25,25 @@ func prependPostScript(m *Metadata, r io.Reader, w io.Writer) error {
 // buildPSCoverPage returns a PostScript program that renders one cover page
 // with the document metadata.
 func buildPSCoverPage(m *Metadata) string {
+	var sb strings.Builder
 	lines := headerLines(m)
-	var ps string
-	ps += "%!PS-Adobe-3.0\n"
-	ps += "%%Pages: (atend)\n"
-	ps += "%%EndComments\n"
-	ps += "%%Page: cover 1\n"
-	ps += "/Helvetica findfont 14 scalefont setfont\n"
+	sb.WriteString("%!PS-Adobe-3.0\n")
+	sb.WriteString("%%Pages: (atend)\n")
+	sb.WriteString("%%EndComments\n")
+	sb.WriteString("%%Page: cover 1\n")
+	sb.WriteString("/Helvetica findfont 14 scalefont setfont\n")
 	y := 720
 	for _, l := range lines {
 		if l == "" {
 			y -= 10
 			continue
 		}
-		ps += fmt.Sprintf("50 %d moveto (%s) show\n", y, psEscapeString(l))
+		fmt.Fprintf(&sb, "50 %d moveto (%s) show\n", y, psEscapeString(l))
 		y -= 20
 	}
-	ps += "showpage\n"
-	ps += "%%EndPage\n"
-	return ps
+	sb.WriteString("showpage\n")
+	sb.WriteString("%%EndPage\n")
+	return sb.String()
 }
 
 // psEscapeString escapes special characters in a PostScript string literal.

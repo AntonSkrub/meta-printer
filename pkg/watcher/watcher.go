@@ -61,7 +61,7 @@ func (w *Watcher) Add(path string) error {
 	if err != nil {
 		return err
 	}
-	w.wds[int(wd)] = path
+	w.wds[wd] = path
 	return nil
 }
 
@@ -73,7 +73,13 @@ func (w *Watcher) Start() {
 // Stop signals the goroutine to exit and releases the inotify file descriptor.
 func (w *Watcher) Stop() {
 	close(w.done)
-	unix.Close(w.fd)
+	err := unix.Close(w.fd)
+	if err != nil {
+		select {
+		case w.Errors <- fmt.Errorf("watcher: close fd: %w", err):
+		default:
+		}
+	}
 }
 
 func (w *Watcher) readEvents() {
@@ -92,6 +98,8 @@ func (w *Watcher) readEvents() {
 
 		offset := 0
 		for offset+unix.SizeofInotifyEvent <= n {
+			// #nosec G103 -- Safe: the buffer bounds are verified before casting to
+			// unix.InotifyEvent, matching the Linux inotify event layout
 			raw := (*unix.InotifyEvent)(unsafe.Pointer(&buf[offset]))
 			mask := raw.Mask
 			nameLen := int(raw.Len)
@@ -145,5 +153,5 @@ func statIdentity(path string) (uint64, uint64, error) {
 		return 0, 0, err
 	}
 
-	return uint64(stat.Dev), stat.Ino, nil
+	return stat.Dev, stat.Ino, nil
 }

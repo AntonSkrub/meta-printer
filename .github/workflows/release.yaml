@@ -1,0 +1,58 @@
+---
+
+name: Publish
+
+on:
+  push:
+    branches: master
+  pull_request:
+    branches: master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      
+      - name: Test
+        run: go test -v ./...
+
+      - name: Build release binaries
+        run: |
+          mkdir -p dist/meta-printer-linux-amd64/bin
+          GOOS=linux GOARCH=amd64 go build -o dist/meta-printer-linux-amd64/bin/metad ./cmd/metad
+          GOOS=linux GOARCH=amd64 go build -o dist/meta-printer-linux-amd64/bin/metafilter ./cmd/metafilter
+
+      - name: Copy install assets
+        run: |
+          mkdir -p dist/meta-printer-linux-amd64/install/cups
+          mkdir -p dist/meta-printer-linux-amd64/install/systemd
+          cp install/cups/install.sh dist/meta-printer-linux-amd64/install/cups/
+          cp install/cups/MetaPrinter.ppd dist/meta-printer-linux-amd64/install/cups/
+          cp install/systemd/metad.service dist/meta-printer-linux-amd64/install/systemd/
+
+      - name: Create archive and checksums
+        run: |
+          cd dist
+          tar -czf meta-printer-linux-amd64.tar.gz meta-printer-linux-amd64
+          sha256sum meta-printer-linux-amd64.tar.gz > meta-printer-linux-amd64.tar.gz.sha256
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            dist/meta-printer-linux-amd64.tar.gz
+            dist/meta-printer-linux-amd64.tar.gz.sha256
+      
