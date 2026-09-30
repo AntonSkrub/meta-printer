@@ -14,9 +14,14 @@
 //
 // The CONTENT_TYPE environment variable (set by CUPS) determines the output
 // format:
-//   - application/pdf or application/vnd.cups-pdf → PDF with cover page
+//   - application/pdf or application/vnd.cups-pdf → PDF with metadata
+//     overlaid on the top margin of every page
 //   - application/postscript or application/vnd.cups-postscript → PostScript
-//   - anything else (including text/plain) → plain text
+//     with a metadata cover page
+//   - DOCX, ODT, DOC, RTF, plain text → PDF whose Writer page-style header
+//     carries the metadata, produced via a headless LibreOffice conversion
+//     (requires LibreOffice and python3 with UNO bindings on PATH)
+//   - any other type is rejected with an error
 package main
 
 import (

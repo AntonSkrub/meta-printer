@@ -15,6 +15,9 @@
 #   --printer-name Name for the CUPS printer queue. Default: MetaPrinter
 #
 # Requires: cups, make and go are only needed when prebuilt binaries are absent.
+# Requires: LibreOffice (soffice) and python3 with UNO bindings (python3-uno)
+#           on the print server, for converting office/text jobs into a
+#           PDF with a real Writer header.
 
 set -euo pipefail
 
@@ -23,6 +26,24 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PRINTER_NAME="MetaPrinter"
 BACKEND_URI="cups-pdf:/"
+
+# ---------- check LibreOffice runtime dependency -----------------------
+if ! command -v soffice &>/dev/null; then
+	echo "Error: 'soffice' (LibreOffice) not found in PATH." >&2
+	echo "  Office/text print jobs cannot get a real document header without it." >&2
+	echo "  Install it, e.g.: sudo apt install libreoffice python3-uno" >&2
+	exit 1
+fi
+if ! command -v python3 &>/dev/null; then
+	echo "Error: 'python3' not found in PATH." >&2
+	echo "  Install it along with the LibreOffice UNO bindings, e.g.: sudo apt install libreoffice python3-uno" >&2
+	exit 1
+fi
+if ! python3 -c "import uno" &>/dev/null; then
+	echo "Error: python3 'uno' module not found." >&2
+	echo "  Install the LibreOffice UNO bindings, e.g.: sudo apt install python3-uno" >&2
+	exit 1
+fi
 
 # ---------- parse arguments -------------------------------------------
 while [[ $# -gt 0 ]]; do
