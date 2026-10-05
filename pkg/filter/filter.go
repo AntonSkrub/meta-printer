@@ -2,8 +2,8 @@
 // into print jobs intercepted by the MetaPrinter CUPS filter.
 //
 // Supported input MIME types:
-//   - application/pdf, application/vnd.cups-pdf → metadata overlaid on the
-//     top margin of every page, original PDF pages preserved
+//   - application/pdf, application/vnd.cups-pdf → metadata cover page
+//     prepended to the original PDF pages
 //   - application/postscript, application/vnd.cups-postscript → PostScript
 //     cover page prepended
 //   - DOCX, ODT, DOC, RTF, plain text → converted to a print-ready PDF whose

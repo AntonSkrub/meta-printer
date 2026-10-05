@@ -14,8 +14,8 @@
 //
 // The CONTENT_TYPE environment variable (set by CUPS) determines the output
 // format:
-//   - application/pdf or application/vnd.cups-pdf → PDF with metadata
-//     overlaid on the top margin of every page
+//   - application/pdf or application/vnd.cups-pdf → PDF with a metadata
+//     cover page prepended
 //   - application/postscript or application/vnd.cups-postscript → PostScript
 //     with a metadata cover page
 //   - DOCX, ODT, DOC, RTF, plain text → PDF whose Writer page-style header
@@ -86,8 +86,7 @@ func main() {
 	// CUPS passes exactly 5 or 6 positional arguments (plus argv[0]).
 	if len(os.Args) < 6 {
 		log.Info().Msg("Usage: metafilter job-id user title copies options [filename]")
-		log.Error().Msgf("metafilter: expected 5 or 6 arguments, got %d", len(os.Args)-1)
-		return
+		fail("arguments", fmt.Errorf("expected 5 or 6 arguments, got %d", len(os.Args)-1))
 	}
 
 	// argv[1] job-id, argv[2] user, argv[3] title, argv[4] copies,
@@ -98,8 +97,7 @@ func main() {
 	// Open input: file argument takes precedence over stdin.
 	input, closeInput, sourcePath, err := openInput(os.Args)
 	if err != nil {
-		log.Error().Err(err).Msg("metafilter: open input")
-		return
+		fail("open input", err)
 	}
 	defer closeInput()
 
@@ -112,9 +110,16 @@ func main() {
 	}
 
 	if err := filter.Prepend(contentType, meta, input, os.Stdout); err != nil {
-		log.Error().Err(err).Msg("metafilter: prepend metadata")
-		return
+		closeInput()
+		fail("prepend metadata", err)
 	}
+}
+
+// fail reports err in the format cupsd expects on stderr and exits non-zero so
+// CUPS marks the job failed instead of printing an empty document.
+func fail(what string, err error) {
+	fmt.Fprintf(os.Stderr, "ERROR: metafilter: %s: %v\n", what, err)
+	os.Exit(1)
 }
 
 // openInput returns a reader for the print-job content.

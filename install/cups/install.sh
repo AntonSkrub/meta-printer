@@ -3,16 +3,20 @@
 #              user service on a Debian/Ubuntu system.
 #
 # Usage:
-#   ./install.sh [--backend-uri <uri>] [--printer-name <name>]
+#   ./install.sh (--target-queue <name> | --target-uri <uri>) [--printer-name <name>]
 #
 # Options:
-#   --backend-uri  URI of the real printer this virtual printer forwards to.
-#                  Defaults to "cups-pdf:/" (write output to PDF file).
-#                  Examples:
+#   --target-queue CUPS queue name of the physical printer (see `lpstat -v`).
+#   --target-uri   Device URI of the physical printer, e.g.
 #                    socket://192.168.1.100:9100   (raw TCP/IP)
 #                    ipp://printer.local/printers/HP
-#                    file:///dev/null               (discard – for testing)
+#                  (--backend-uri is accepted as an alias.)
 #   --printer-name Name for the CUPS printer queue. Default: MetaPrinter
+#
+# Exactly one of --target-queue / --target-uri is required unless
+# /etc/meta-printer/target.json already exists. The target is applied by the
+# root-run meta-printer-target.service at boot; to change it later edit that
+# file and run: sudo systemctl restart meta-printer-target
 #
 # Requires: cups, make and go are only needed when prebuilt binaries are absent.
 # Requires: LibreOffice (soffice) and python3 with UNO bindings (python3-uno)
@@ -25,7 +29,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PRINTER_NAME="MetaPrinter"
-BACKEND_URI="cups-pdf:/"
+TARGET_QUEUE=""
+TARGET_URI=""
+TARGET_CONFIG="/etc/meta-printer/target.json"
+# Placeholder device until meta-printer-target.service applies the real target.
+PLACEHOLDER_URI="socket://127.0.0.1:9"
 
 # ---------- check LibreOffice runtime dependency -----------------------
 if ! command -v soffice &>/dev/null; then
@@ -48,8 +56,12 @@ fi
 # ---------- parse arguments -------------------------------------------
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-	--backend-uri)
-		BACKEND_URI="$2"
+	--target-uri | --backend-uri)
+		TARGET_URI="$2"
+		shift 2
+		;;
+	--target-queue)
+		TARGET_QUEUE="$2"
 		shift 2
 		;;
 	--printer-name)
@@ -63,11 +75,21 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+if [[ -n "${TARGET_QUEUE}" && -n "${TARGET_URI}" ]]; then
+	echo "Error: use only one of --target-queue / --target-uri." >&2
+	exit 1
+fi
+if [[ -z "${TARGET_QUEUE}${TARGET_URI}" && ! -f "${TARGET_CONFIG}" ]]; then
+	echo "Error: specify the physical printer with --target-queue or --target-uri." >&2
+	exit 1
+fi
+
 # ---------- resolve binaries (prefer prebuilt) --------------------------------
 METAD_BIN="${REPO_ROOT}/bin/metad"
 METAFILTER_BIN="${REPO_ROOT}/bin/metafilter"
+METATARGET_BIN="${REPO_ROOT}/bin/metatarget"
 
-if [[ -x "${METAD_BIN}" && -x "${METAFILTER_BIN}" ]]; then
+if [[ -x "${METAD_BIN}" && -x "${METAFILTER_BIN}" && -x "${METATARGET_BIN}" ]]; then
 	echo "==> Using prebuilt binaries in ${REPO_ROOT}/bin"
 else
 	echo "==> Prebuilt binaries not found – building from source..."
@@ -75,10 +97,11 @@ else
 fi
 
 # Verify binaries exist after prebuilt-or-build path.
-if [[ ! -x "${METAD_BIN}" || ! -x "${METAFILTER_BIN}" ]]; then
+if [[ ! -x "${METAD_BIN}" || ! -x "${METAFILTER_BIN}" || ! -x "${METATARGET_BIN}" ]]; then
 	echo "Error: required binaries are missing:"
 	echo "  ${METAD_BIN}"
 	echo "  ${METAFILTER_BIN}"
+	echo "  ${METATARGET_BIN}"
 	exit 1
 fi
 
@@ -87,6 +110,25 @@ FILTER_DIR="/usr/lib/cups/filter"
 echo "==> Installing CUPS filter to ${FILTER_DIR}/metafilter"
 sudo install -o root -g root -m 0755 \
 	"${METAFILTER_BIN}" "${FILTER_DIR}/metafilter"
+
+# ---------- register office MIME types --------------------------------
+echo "==> Installing office MIME types"
+sudo install -o root -g root -m 0644 \
+	"${SCRIPT_DIR}/meta-printer.types" /usr/share/cups/mime/meta-printer.types
+
+# ---------- write target printer config -------------------------------
+if [[ -n "${TARGET_QUEUE}${TARGET_URI}" ]]; then
+	echo "==> Writing ${TARGET_CONFIG}"
+	sudo mkdir -p "$(dirname "${TARGET_CONFIG}")"
+	if [[ -n "${TARGET_QUEUE}" ]]; then
+		TARGET_JSON="$(printf '{"metaQueue":"%s","queue":"%s"}\n' "${PRINTER_NAME}" "${TARGET_QUEUE}")"
+	else
+		TARGET_JSON="$(printf '{"metaQueue":"%s","uri":"%s"}\n' "${PRINTER_NAME}" "${TARGET_URI}")"
+	fi
+	printf '%s\n' "${TARGET_JSON}" | sudo tee "${TARGET_CONFIG}" >/dev/null
+	sudo chown root:root "${TARGET_CONFIG}"
+	sudo chmod 0644 "${TARGET_CONFIG}"
+fi
 
 # ---------- install PPD -----------------------------------------------
 PPD_DIR="/usr/share/ppd/meta-printer"
@@ -111,7 +153,7 @@ fi
 sudo lpadmin \
 	-p "${PRINTER_NAME}" \
 	-E \
-	-v "${BACKEND_URI}" \
+	-v "${PLACEHOLDER_URI}" \
 	-P "${PPD_PATH}" \
 	-D "Meta Printer (metadata injection)" \
 	-L "Virtual CUPS printer – prepends document metadata"
@@ -119,6 +161,17 @@ sudo lpadmin \
 echo "==> Enabling and accepting jobs for '${PRINTER_NAME}'"
 sudo cupsenable "${PRINTER_NAME}"
 sudo cupsaccept "${PRINTER_NAME}"
+
+# ---------- install & start root target-retargeting unit --------------
+echo "==> Installing meta-printer-target.service (applies the target printer at boot)"
+sudo install -o root -g root -m 0755 "${METATARGET_BIN}" /usr/local/sbin/metatarget
+sudo install -o root -g root -m 0644 \
+	"${SCRIPT_DIR}/../systemd/meta-printer-target.service" \
+	/etc/systemd/system/meta-printer-target.service
+sudo systemctl daemon-reload
+sudo systemctl enable meta-printer-target.service
+sudo systemctl restart meta-printer-target.service
+sudo systemctl restart cups
 
 # ---------- install & start systemd user service ----------------------
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
@@ -139,7 +192,7 @@ systemctl --user enable --now metad.service
 echo ""
 echo "Installation complete."
 echo "  CUPS printer : ${PRINTER_NAME}"
-echo "  Backend URI  : ${BACKEND_URI}"
+echo "  Target config: ${TARGET_CONFIG}  (edit, then: sudo systemctl restart meta-printer-target)"
 echo "  Filter       : ${FILTER_DIR}/metafilter"
 echo "  Daemon       : /usr/local/bin/metad  (systemd user service)"
 echo ""

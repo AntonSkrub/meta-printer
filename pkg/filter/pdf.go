@@ -12,6 +12,9 @@ import (
 // prependPDF creates a single-page PDF cover containing m's metadata, merges
 // it with the original PDF from r, and writes the result to w.
 func prependPDF(m *Metadata, r io.Reader, w io.Writer) error {
+	// The CUPS filter user (lp) typically has no writable $HOME for pdfcpu's config dir.
+	api.DisableConfigDir()
+
 	original, err := io.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("pdf: read input: %w", err)
