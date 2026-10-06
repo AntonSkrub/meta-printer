@@ -37,6 +37,7 @@ jobs:
           mkdir -p dist/meta-printer-linux-amd64/bin
           GOOS=linux GOARCH=amd64 go build -o dist/meta-printer-linux-amd64/bin/metad ./cmd/metad
           GOOS=linux GOARCH=amd64 go build -o dist/meta-printer-linux-amd64/bin/metafilter ./cmd/metafilter
+          GOOS=linux GOARCH=amd64 go build -o dist/meta-printer-linux-amd64/bin/metatarget ./cmd/metatarget
 
       - name: Copy install assets
         run: |
@@ -44,7 +45,9 @@ jobs:
           mkdir -p dist/meta-printer-linux-amd64/install/systemd
           cp install/cups/install.sh dist/meta-printer-linux-amd64/install/cups/
           cp install/cups/MetaPrinter.ppd dist/meta-printer-linux-amd64/install/cups/
+          cp install/cups/meta-printer.types dist/meta-printer-linux-amd64/install/cups/
           cp install/systemd/metad.service dist/meta-printer-linux-amd64/install/systemd/
+          cp install/systemd/meta-printer-target.service dist/meta-printer-linux-amd64/install/systemd/
 
       - name: Create archive and checksums
         run: |

@@ -1,0 +1,6 @@
+# Office MIME types so `lp file.odt` is accepted and routed to metafilter.
+# Matched by file extension only.
+application/vnd.oasis.opendocument.text	odt
+application/vnd.openxmlformats-officedocument.wordprocessingml.document	docx
+application/msword	doc
+application/rtf	rtf

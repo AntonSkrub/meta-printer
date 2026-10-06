@@ -1,5 +1,24 @@
 # meta-printer
-The Meta-Printer is a background application that intercepts print-jobs, to inject some metadata (filename, filepath), at the beginning of the document. This should be done in a temporary file, rather than modifying the original document. After the print job is completed, the temporary file can be deleted.
+The Meta-Printer is a background application that intercepts print-jobs, to inject some metadata (filename, filepath), into the document. This should be done in a temporary file, rather than modifying the original document. After the print job is completed, the temporary file can be deleted.
+
+## Metadata placement by input type
+
+- **Office/text sources (DOCX, ODT, DOC, RTF, plain text):** the temporary file is converted to a PDF via a headless LibreOffice instance, with the metadata inserted into a real Writer page-style header (Kopfzeile) that repeats on every page. Any existing header content is preserved, with the metadata inserted before it. Requires LibreOffice and python3 with UNO bindings on the print server (see [install/cups/install.sh](install/cups/install.sh)).
+- **PDF sources:** a metadata cover page is prepended ahead of the original pages.
+- **PostScript sources:** a metadata cover page is prepended ahead of the original document.
+
+## Target printer
+
+The physical printer is set in `/etc/meta-printer/target.json` (root-owned), with exactly one of `queue` (CUPS queue name) or `uri` (device URI):
+
+```json
+{"metaQueue": "MetaPrinter", "queue": "HP_LaserJet"}
+```
+
+`meta-printer-target.service` applies it to the MetaPrinter queue at boot, so end users never need `lpadmin` rights. After editing the file run `sudo systemctl restart meta-printer-target`.
+
+Jobs printed from a GUI app (for example LibreOffice) arrive already rendered as PDF/PostScript, so they get the PDF/PostScript treatment; the true Writer header applies when an office file itself reaches the filter, e.g. `lp -d MetaPrinter file.odt`.
+
 
 ## Identity and Matching Strategy
 

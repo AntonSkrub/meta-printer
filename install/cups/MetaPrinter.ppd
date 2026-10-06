@@ -24,11 +24,18 @@
 *TTRasterizer: Type42
 
 *% ---- Supported input formats ----------------------------------------
-*% metafilter accepts PDF, PostScript, and plain text, passes the same
-*% MIME type through with the metadata cover page prepended.
+*% metafilter accepts PDF, PostScript and office/text documents (DOCX,
+*% ODT, DOC, RTF, plain text). PDF/PostScript are re-emitted in the same
+*% format with metadata overlaid/prepended; office and text documents are
+*% converted to PDF with the metadata inserted into a real Writer header
+*% (requires LibreOffice + python3-uno on the print server).
 *cupsFilter2: "application/pdf application/pdf 0 metafilter"
 *cupsFilter2: "application/postscript application/postscript 0 metafilter"
-*cupsFilter2: "text/plain application/postscript 100 metafilter"
+*cupsFilter2: "text/plain application/pdf 100 metafilter"
+*cupsFilter2: "application/msword application/pdf 100 metafilter"
+*cupsFilter2: "application/rtf application/pdf 100 metafilter"
+*cupsFilter2: "application/vnd.oasis.opendocument.text application/pdf 100 metafilter"
+*cupsFilter2: "application/vnd.openxmlformats-officedocument.wordprocessingml.document application/pdf 100 metafilter"
 
 *% ---- Page sizes -----------------------------------------------------
 *OpenUI *PageSize/Media Size: PickOne
