@@ -1,18 +1,8 @@
 // Package filter injects document-metadata (filename, filepath, print time)
 // into print jobs intercepted by the MetaPrinter CUPS filter.
 //
-// Supported input MIME types:
-//   - application/pdf, application/vnd.cups-pdf → metadata cover page
-//     prepended to the original PDF pages
-//   - application/postscript, application/vnd.cups-postscript → PostScript
-//     cover page prepended
-//   - DOCX, ODT, DOC, RTF, plain text → converted to a print-ready PDF whose
-//     Writer page-style header (Kopfzeile) carries the metadata, via a
-//     headless LibreOffice instance; any existing header content is kept,
-//     with the metadata inserted before it
-//
-// Any other MIME type is rejected with an error rather than silently
-// treated as plain text, to avoid corrupting binary inputs.
+// Supported input MIME types are PDF and PostScript. PDF metadata is added on
+// a cover page, while PostScript jobs receive a PostScript cover page.
 package filter
 
 import (
@@ -44,9 +34,6 @@ func Prepend(contentType string, m *Metadata, r io.Reader, w io.Writer) error {
 	case "application/postscript", "application/vnd.cups-postscript":
 		return prependPostScript(m, r, w)
 	default:
-		if ext, ok := officeExtensions[ct]; ok {
-			return prependOfficeHeader(ext, m, r, w)
-		}
 		return fmt.Errorf("filter: unsupported content type %q", contentType)
 	}
 }

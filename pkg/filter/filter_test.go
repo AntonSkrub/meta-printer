@@ -110,20 +110,6 @@ func TestPrependPostScript(t *testing.T) {
 
 // ---- Prepend dispatcher ---------------------------------------------
 
-func TestPrepend_TextType_RoutesToOffice(t *testing.T) {
-	// Not parallel: mutates the shared sofficeBinary/pythonBinary package vars.
-	requireSoffice(t)
-
-	var out bytes.Buffer
-	err := Prepend("text/plain", testMeta, strings.NewReader("body\n"), &out)
-	if err != nil {
-		t.Fatalf("Prepend: %v", err)
-	}
-	if !bytes.HasPrefix(out.Bytes(), []byte("%PDF-")) {
-		t.Error("expected converted output to be a PDF")
-	}
-}
-
 func TestPrepend_UnsupportedType(t *testing.T) {
 	t.Parallel()
 
@@ -171,12 +157,11 @@ func TestPrepend_PDFType(t *testing.T) {
 }
 
 func TestPrepend_StripsMIMEParameters(t *testing.T) {
-	// Not parallel: mutates the shared sofficeBinary/pythonBinary package vars.
-	requireSoffice(t)
+	t.Parallel()
 
-	// MIME type with charset parameter must still route to the office handler.
+	original := buildCoverPagePDF(testMeta)
 	var out bytes.Buffer
-	err := Prepend("text/plain; charset=utf-8", testMeta, strings.NewReader("hi\n"), &out)
+	err := Prepend("application/pdf; version=1", testMeta, bytes.NewReader(original), &out)
 	if err != nil {
 		t.Fatalf("Prepend: %v", err)
 	}

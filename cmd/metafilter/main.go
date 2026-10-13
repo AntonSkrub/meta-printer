@@ -18,10 +18,7 @@
 //     cover page prepended
 //   - application/postscript or application/vnd.cups-postscript → PostScript
 //     with a metadata cover page
-//   - DOCX, ODT, DOC, RTF, plain text → PDF whose Writer page-style header
-//     carries the metadata, produced via a headless LibreOffice conversion
-//     (requires LibreOffice and python3 with UNO bindings on PATH)
-//   - any other type is rejected with an error
+//   - other types use the filter's unsupported-content-type fallback
 package main
 
 import (

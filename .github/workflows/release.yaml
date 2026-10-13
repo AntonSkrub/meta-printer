@@ -45,7 +45,6 @@ jobs:
           mkdir -p dist/meta-printer-linux-amd64/install/systemd
           cp install/cups/install.sh dist/meta-printer-linux-amd64/install/cups/
           cp install/cups/MetaPrinter.ppd dist/meta-printer-linux-amd64/install/cups/
-          cp install/cups/meta-printer.types dist/meta-printer-linux-amd64/install/cups/
           cp install/systemd/metad.service dist/meta-printer-linux-amd64/install/systemd/
           cp install/systemd/meta-printer-target.service dist/meta-printer-linux-amd64/install/systemd/
 

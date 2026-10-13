@@ -19,9 +19,6 @@
 # file and run: sudo systemctl restart meta-printer-target
 #
 # Requires: cups, make and go are only needed when prebuilt binaries are absent.
-# Requires: LibreOffice (soffice) and python3 with UNO bindings (python3-uno)
-#           on the print server, for converting office/text jobs into a
-#           PDF with a real Writer header.
 
 set -euo pipefail
 
@@ -34,24 +31,6 @@ TARGET_URI=""
 TARGET_CONFIG="/etc/meta-printer/target.json"
 # Placeholder device until meta-printer-target.service applies the real target.
 PLACEHOLDER_URI="socket://127.0.0.1:9"
-
-# ---------- check LibreOffice runtime dependency -----------------------
-if ! command -v soffice &>/dev/null; then
-	echo "Error: 'soffice' (LibreOffice) not found in PATH." >&2
-	echo "  Office/text print jobs cannot get a real document header without it." >&2
-	echo "  Install it, e.g.: sudo apt install libreoffice python3-uno" >&2
-	exit 1
-fi
-if ! command -v python3 &>/dev/null; then
-	echo "Error: 'python3' not found in PATH." >&2
-	echo "  Install it along with the LibreOffice UNO bindings, e.g.: sudo apt install libreoffice python3-uno" >&2
-	exit 1
-fi
-if ! python3 -c "import uno" &>/dev/null; then
-	echo "Error: python3 'uno' module not found." >&2
-	echo "  Install the LibreOffice UNO bindings, e.g.: sudo apt install python3-uno" >&2
-	exit 1
-fi
 
 # ---------- parse arguments -------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -111,10 +90,8 @@ echo "==> Installing CUPS filter to ${FILTER_DIR}/metafilter"
 sudo install -o root -g root -m 0755 \
 	"${METAFILTER_BIN}" "${FILTER_DIR}/metafilter"
 
-# ---------- register office MIME types --------------------------------
-echo "==> Installing office MIME types"
-sudo install -o root -g root -m 0644 \
-	"${SCRIPT_DIR}/meta-printer.types" /usr/share/cups/mime/meta-printer.types
+# Remove the MIME registrations installed by previous office-format builds.
+sudo rm -f /usr/share/cups/mime/meta-printer.types
 
 # ---------- write target printer config -------------------------------
 if [[ -n "${TARGET_QUEUE}${TARGET_URI}" ]]; then
