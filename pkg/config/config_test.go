@@ -56,20 +56,31 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_RejectsEmptyWatchDirs(t *testing.T) {
+func TestConfigValidate_AllowsEmptyWatchDirs(t *testing.T) {
 	t.Parallel()
 
 	cfg := Config{
 		LogLevel:    -1,
-		DatabaseDir: "/var/lib/meta-printer",
+		DatabaseDir: DefaultDatabaseDir,
 		DaemonDB: DatabaseConfig{
 			Driver: "sqlite",
 			Name:   "metadata",
 		},
 	}
 
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate should reject empty watch dirs")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate should accept empty watch dirs (metafilter): %v", err)
+	}
+}
+
+func TestConfigValidateWatch_RejectsEmptyWatchDirs(t *testing.T) {
+	t.Parallel()
+
+	if err := (Config{}).ValidateWatch(); err == nil {
+		t.Fatal("ValidateWatch should reject empty watch dirs")
+	}
+	if err := (Config{WatchDirs: []string{"/tmp/watch"}}).ValidateWatch(); err != nil {
+		t.Fatalf("ValidateWatch: %v", err)
 	}
 }
 

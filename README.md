@@ -1,9 +1,20 @@
 # meta-printer
-The Meta-Printer is a background application that intercepts print-jobs, to inject some meta-data (filename, filepath), at the beginning of the document. This should be done in a temporary file, rather than modifying the original document. After the print job is completed, the temporary file can be deleted.
+The Meta-Printer is a background application that intercepts print-jobs, to inject some metadata (filename, filepath), into the document. This should be done in a temporary file, rather than modifying the original document. After the print job is completed, the temporary file can be deleted.
 
-## Description
+## Supported print formats
 
-The Meta-Printer is a background application that intercepts print-jobs, to inject some metadata (filename, filepath), at the beginning of the document. This should be done in a temporary file, rather than modifying the original document. After the print job is completed, the temporary file can be deleted.
+- **PDF:** a metadata cover page is prepended ahead of the original pages.
+- **PostScript:** a PostScript metadata cover page is prepended ahead of the original document.
+
+## Target printer
+
+The physical printer is set in `/etc/meta-printer/target.json` (root-owned), with exactly one of `queue` (CUPS queue name) or `uri` (device URI):
+
+```json
+{"metaQueue": "MetaPrinter", "queue": "HP_LaserJet"}
+```
+
+`meta-printer-target.service` applies it to the MetaPrinter queue at boot, so end users never need `lpadmin` rights. After editing the file run `sudo systemctl restart meta-printer-target`.
 
 ## Identity and Matching Strategy
 

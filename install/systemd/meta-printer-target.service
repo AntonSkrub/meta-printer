@@ -1,0 +1,17 @@
+[Unit]
+Description=Point the MetaPrinter CUPS queue at the configured physical printer
+After=cups.service
+Wants=cups.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/metatarget -config /etc/meta-printer/target.json
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=metatarget
+NoNewPrivileges=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

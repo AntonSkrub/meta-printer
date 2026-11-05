@@ -14,12 +14,7 @@ import (
 
 // supportedExts is the set of file extensions the daemon tracks.
 var supportedExts = map[string]bool{
-	".pdf":  true,
-	".docx": true,
-	".doc":  true,
-	".odt":  true,
-	".txt":  true,
-	".rtf":  true,
+	".pdf": true,
 }
 
 // Event represents a file-open detection.

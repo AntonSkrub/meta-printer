@@ -1,14 +1,12 @@
-// Package filter prepends document-metadata (filename, filepath, print time)
-// to print jobs intercepted by the MetaPrinter CUPS filter.
+// Package filter injects document-metadata (filename, filepath, print time)
+// into print jobs intercepted by the MetaPrinter CUPS filter.
 //
-// Supported input MIME types:
-//   - application/pdf            → PDF cover page prepended and PDFs merged
-//   - application/postscript     → PostScript header page prepended
-//   - application/vnd.cups-pdf  → treated as PDF
-//   - text/plain                 → plain-text header prepended
+// Supported input MIME types are PDF and PostScript. PDF metadata is added on
+// a cover page, while PostScript jobs receive a PostScript cover page.
 package filter
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -36,8 +34,7 @@ func Prepend(contentType string, m *Metadata, r io.Reader, w io.Writer) error {
 	case "application/postscript", "application/vnd.cups-postscript":
 		return prependPostScript(m, r, w)
 	default:
-		// text/plain and any unrecognised type – prepend a plain-text header.
-		return prependText(m, r, w)
+		return fmt.Errorf("filter: unsupported content type %q", contentType)
 	}
 }
 

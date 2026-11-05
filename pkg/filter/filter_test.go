@@ -89,24 +89,6 @@ func TestBuildCoverPagePDF_ValidHeader(t *testing.T) {
 	}
 }
 
-// ---- prependText -----------------------------------------------------
-
-func TestPrependText(t *testing.T) {
-	t.Parallel()
-
-	original := "Hello, world!\n"
-	var out bytes.Buffer
-	if err := prependText(testMeta, strings.NewReader(original), &out); err != nil {
-		t.Fatalf("prependText: %v", err)
-	}
-	result := out.String()
-	for _, want := range []string{"report.pdf", "/home/user", "2024-06-01", original} {
-		if !strings.Contains(result, want) {
-			t.Errorf("output missing %q", want)
-		}
-	}
-}
-
 // ---- prependPostScript -----------------------------------------------
 
 func TestPrependPostScript(t *testing.T) {
@@ -128,15 +110,13 @@ func TestPrependPostScript(t *testing.T) {
 
 // ---- Prepend dispatcher ---------------------------------------------
 
-func TestPrepend_TextType(t *testing.T) {
+func TestPrepend_UnsupportedType(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
-	if err := Prepend("text/plain", testMeta, strings.NewReader("body\n"), &out); err != nil {
-		t.Fatalf("Prepend: %v", err)
-	}
-	if !strings.Contains(out.String(), "body") {
-		t.Error("original body missing from output")
+	err := Prepend("application/octet-stream", testMeta, strings.NewReader("data"), &out)
+	if err == nil {
+		t.Fatal("expected an error for an unsupported content type")
 	}
 }
 
@@ -179,13 +159,13 @@ func TestPrepend_PDFType(t *testing.T) {
 func TestPrepend_StripsMIMEParameters(t *testing.T) {
 	t.Parallel()
 
-	// MIME type with charset parameter must still route to text handler.
+	original := buildCoverPagePDF(testMeta)
 	var out bytes.Buffer
-	err := Prepend("text/plain; charset=utf-8", testMeta, strings.NewReader("hi\n"), &out)
+	err := Prepend("application/pdf; version=1", testMeta, bytes.NewReader(original), &out)
 	if err != nil {
 		t.Fatalf("Prepend: %v", err)
 	}
-	if !strings.Contains(out.String(), "hi") {
-		t.Error("original body missing from output")
+	if !bytes.HasPrefix(out.Bytes(), []byte("%PDF-")) {
+		t.Error("expected converted output to be a PDF")
 	}
 }

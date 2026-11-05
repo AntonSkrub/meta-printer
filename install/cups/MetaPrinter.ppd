@@ -24,11 +24,10 @@
 *TTRasterizer: Type42
 
 *% ---- Supported input formats ----------------------------------------
-*% metafilter accepts PDF, PostScript, and plain text, passes the same
-*% MIME type through with the metadata cover page prepended.
+*% PDF and PostScript jobs are passed through metafilter in their original
+*% format with a metadata cover page prepended.
 *cupsFilter2: "application/pdf application/pdf 0 metafilter"
 *cupsFilter2: "application/postscript application/postscript 0 metafilter"
-*cupsFilter2: "text/plain application/postscript 100 metafilter"
 
 *% ---- Page sizes -----------------------------------------------------
 *OpenUI *PageSize/Media Size: PickOne

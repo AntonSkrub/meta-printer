@@ -18,6 +18,10 @@ import (
 	"github.com/valentin-kaiser/go-core/flag"
 )
 
+// DefaultDatabaseDir is shared by metad (running as the desktop user) and
+// metafilter (running as lp under CUPS, without a usable home directory).
+const DefaultDatabaseDir = "/var/lib/meta-printer"
+
 // Config holds all configurable values for Meta-Printer.
 type Config struct {
 	LogLevel int8 `usage:"(0 = debug, 1 = info, 2 = warn, 3 = error, 4 = fatal, 5 = panic)"`
@@ -41,10 +45,6 @@ type DatabaseConfig struct {
 
 func Init() {
 	home, _ := os.UserHomeDir()
-	dbPath := "/var/lib/meta-printer"
-	if home != "" {
-		dbPath = filepath.Join(home, ".local", "share", "meta-printer")
-	}
 
 	// create an instance of the configManager
 	cm := config.Manager()
@@ -59,7 +59,7 @@ func Init() {
 			Port:   3306,
 			Name:   "metadata",
 		},
-		DatabaseDir: dbPath,
+		DatabaseDir: DefaultDatabaseDir,
 	}
 
 	err := cm.Register(conf)
@@ -118,16 +118,21 @@ func (c Config) Validate() error {
 	if c.LogLevel < -1 || c.LogLevel > 5 {
 		return apperror.NewError("LogLevel must be between -1 and 5")
 	}
-	if len(c.WatchDirs) == 0 {
-		return apperror.NewError("WatchDirs can not be empty")
-	}
-
 	if err := c.DaemonDB.Validate(); err != nil {
 		return apperror.Wrap(err)
 	}
 
 	if c.DatabaseDir == "" {
 		return apperror.NewError("DatabaseDir must be provided")
+	}
+	return nil
+}
+
+// ValidateWatch checks the settings only metad needs. metafilter must not
+// call it, as it runs without a home directory and thus without watch dirs.
+func (c Config) ValidateWatch() error {
+	if len(c.WatchDirs) == 0 {
+		return apperror.NewError("WatchDirs can not be empty")
 	}
 	return nil
 }

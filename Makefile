@@ -12,10 +12,11 @@ GOFLAGS  ?=
 BIN_DIR   = bin
 METAD     = $(BIN_DIR)/metad
 METAFILTER = $(BIN_DIR)/metafilter
+METATARGET = $(BIN_DIR)/metatarget
 
 all: build
 
-build: $(METAD) $(METAFILTER)
+build: $(METAD) $(METAFILTER) $(METATARGET)
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -25,6 +26,9 @@ $(METAD): $(BIN_DIR) $(shell find cmd/metad pkg -name '*.go')
 
 $(METAFILTER): $(BIN_DIR) $(shell find cmd/metafilter pkg -name '*.go')
 	go build $(GOFLAGS) -o $@ ./cmd/metafilter
+
+$(METATARGET): $(BIN_DIR) $(shell find cmd/metatarget pkg -name '*.go')
+	go build $(GOFLAGS) -o $@ ./cmd/metatarget
 
 test:
 	go test $(GOFLAGS) ./...
