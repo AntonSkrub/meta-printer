@@ -79,6 +79,9 @@ func main() {
 	}
 
 	cfg := config.Get()
+	if err := cfg.ValidateWatch(); err != nil {
+		log.Fatal().Err(err).Msg("metad: invalid config")
+	}
 
 	dbPath := filepath.Join(cfg.DatabaseDir, cfg.DaemonDB.Name+".db")
 	store, err := database.New(dbPath)

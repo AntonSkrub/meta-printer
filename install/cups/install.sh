@@ -116,10 +116,17 @@ sudo install -o root -g root -m 0644 \
 	"${SCRIPT_DIR}/MetaPrinter.ppd" "${PPD_PATH}"
 
 # ---------- create shared metadata directory --------------------------
-echo "==> Creating /var/lib/meta-printer (writable by lp group)"
+echo "==> Creating /var/lib/meta-printer (shared by metad and the lp-run filter)"
 sudo mkdir -p /var/lib/meta-printer
-sudo chown root:lp /var/lib/meta-printer
-sudo chmod 0775 /var/lib/meta-printer
+sudo chown "$(id -un)":lp /var/lib/meta-printer
+# setgid keeps new database files in group lp so the CUPS filter can write them.
+sudo chmod 2775 /var/lib/meta-printer
+sudo chmod g+rw /var/lib/meta-printer/metadata.db* 2>/dev/null || true
+sudo chgrp lp /var/lib/meta-printer/metadata.db* 2>/dev/null || true
+if ! id -nG | tr ' ' '\n' | grep -qx lp; then
+	sudo usermod -aG lp "$(id -un)"
+	echo "    Added $(id -un) to group lp (log out and in again for it to apply)"
+fi
 
 # ---------- register CUPS printer -------------------------------------
 echo "==> Registering printer '${PRINTER_NAME}' in CUPS"
