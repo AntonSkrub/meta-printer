@@ -24,8 +24,7 @@
 *TTRasterizer: Type42
 
 *% ---- Supported input formats ----------------------------------------
-*% PDF and PostScript jobs are passed through metafilter in their original
-*% format with a metadata cover page prepended.
+*% PDF jobs get a first-page metadata header; PostScript gets a cover page.
 *cupsFilter2: "application/pdf application/pdf 0 metafilter"
 *cupsFilter2: "application/postscript application/postscript 0 metafilter"
 

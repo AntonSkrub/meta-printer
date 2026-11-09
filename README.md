@@ -1,10 +1,12 @@
 # meta-printer
-The Meta-Printer is a background application that intercepts print-jobs, to inject some metadata (filename, filepath), into the document. This should be done in a temporary file, rather than modifying the original document. After the print job is completed, the temporary file can be deleted.
+The Meta-Printer is a background application that intercepts print jobs and adds metadata (filename, filepath and print time) to the print output without modifying the original document.
 
 ## Supported print formats
 
-- **PDF:** a metadata cover page is prepended ahead of the original pages.
+- **PDF:** a metadata header is overlaid at the top of the first page. It can cover existing content in the top margin; the original document is not modified.
 - **PostScript:** a PostScript metadata cover page is prepended ahead of the original document.
+
+The original path is included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
 
 ## Target printer
 
