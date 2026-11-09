@@ -3,9 +3,16 @@ package filter
 
 import (
 	"bytes"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
 
 var testMeta = &Metadata{
@@ -63,29 +70,26 @@ func TestPDFString_NonASCII(t *testing.T) {
 	}
 }
 
-// ---- buildContentStream / buildCoverPagePDF --------------------------
+// ---- buildHeaderPDF -------------------------------------------------
 
-func TestBuildContentStream_ContainsMetadata(t *testing.T) {
+func TestBuildHeaderPDF_ContainsMetadata(t *testing.T) {
 	t.Parallel()
 
-	cs := buildContentStream(testMeta)
-	for _, want := range []string{"report.pdf", "/home/user", "BT", "ET"} {
-		if !strings.Contains(cs, want) {
-			t.Errorf("content stream missing %q", want)
+	data := buildHeaderPDF(testMeta)
+	for _, want := range []string{"report.pdf", "/home/user", "2024-06-01", "BT", "ET", "%PDF-", "%%EOF"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Errorf("header PDF missing %q", want)
 		}
 	}
 }
 
-func TestBuildCoverPagePDF_ValidHeader(t *testing.T) {
+func TestBuildHeaderPDF_WrapsLongValues(t *testing.T) {
 	t.Parallel()
 
-	data := buildCoverPagePDF(testMeta)
-
-	if !bytes.HasPrefix(data, []byte("%PDF-")) {
-		t.Error("output does not start with %PDF-")
-	}
-	if !bytes.Contains(data, []byte("%%EOF")) {
-		t.Error("output does not contain PDF end-of-file marker")
+	data := buildHeaderPDF(&Metadata{Filepath: strings.Repeat("a", 100)})
+	if !bytes.Contains(data, []byte(strings.Repeat("a", 84))) ||
+		!bytes.Contains(data, []byte(strings.Repeat("a", 16))) {
+		t.Error("long path was not wrapped")
 	}
 }
 
@@ -136,9 +140,7 @@ func TestPrepend_PSType(t *testing.T) {
 func TestPrepend_PDFType(t *testing.T) {
 	t.Parallel()
 
-	// Use our own cover-page PDF as a stand-in for the "original document"
-	// so we don't need an external file.
-	original := buildCoverPagePDF(testMeta)
+	original := buildTextPDF([]string{"original"}, 595, 842, 100)
 
 	var out bytes.Buffer
 	if err := Prepend("application/pdf", testMeta, bytes.NewReader(original), &out); err != nil {
@@ -149,17 +151,99 @@ func TestPrepend_PDFType(t *testing.T) {
 	if !bytes.HasPrefix(result, []byte("%PDF-")) {
 		t.Error("merged PDF output does not start with %PDF-")
 	}
-	// Merged output must be larger than a single cover page.
-	if len(result) <= len(original) {
-		t.Errorf("merged PDF (%d bytes) is not larger than single page (%d bytes)",
-			len(result), len(original))
+	count, err := api.PageCount(bytes.NewReader(result), model.NewDefaultConfiguration())
+	if err != nil || count != 1 {
+		t.Errorf("output page count = %d, error = %v; want one page", count, err)
+	}
+}
+
+func TestPrependPDF_OnlyFirstPage(t *testing.T) {
+	api.DisableConfigDir()
+	first := buildTextPDF([]string{"original first"}, 595, 842, 100)
+	second := buildTextPDF([]string{"original second"}, 595, 842, 100)
+	var original bytes.Buffer
+	if err := api.MergeRaw([]io.ReadSeeker{bytes.NewReader(first), bytes.NewReader(second)}, &original, false, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := Prepend("application/pdf", testMeta, bytes.NewReader(original.Bytes()), &out); err != nil {
+		t.Fatal(err)
+	}
+	count, err := api.PageCount(bytes.NewReader(out.Bytes()), model.NewDefaultConfiguration())
+	if err != nil || count != 2 {
+		t.Fatalf("output page count = %d, error = %v; want two pages", count, err)
+	}
+	contents := make(map[int][]byte)
+	err = api.ExtractContent(bytes.NewReader(out.Bytes()), nil, func(r io.Reader, page int) error {
+		var readErr error
+		contents[page], readErr = io.ReadAll(r)
+		return readErr
+	}, model.NewDefaultConfiguration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(contents[1], []byte("original first")) || !bytes.Contains(contents[2], []byte("original second")) {
+		t.Fatal("original page content was not preserved")
+	}
+	if bytes.Contains(contents[2], []byte(" Do")) {
+		t.Error("second page unexpectedly contains a stamp")
+	}
+	if !bytes.Contains(contents[1], []byte(" Do")) {
+		t.Error("first page does not contain a stamp")
+	}
+}
+
+func TestPrependPDF_ExtractedText(t *testing.T) {
+	pdftotext, err := exec.LookPath("pdftotext")
+	if err != nil {
+		t.Skip("pdftotext is not installed")
+	}
+	api.DisableConfigDir()
+	first := buildTextPDF([]string{"original first"}, 595, 842, 100)
+	second := buildTextPDF([]string{"original second"}, 595, 842, 100)
+	var original bytes.Buffer
+	if err := api.MergeRaw([]io.ReadSeeker{bytes.NewReader(first), bytes.NewReader(second)}, &original, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	meta := &Metadata{Filename: "test%path (1).pdf", Filepath: "/home/user/test%path (1).pdf", PrintTime: testMeta.PrintTime}
+	var result bytes.Buffer
+	if err := Prepend("application/pdf", meta, bytes.NewReader(original.Bytes()), &result); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "output.pdf")
+	textPath := filepath.Join(dir, "output.txt")
+	if err := os.WriteFile(pdfPath, result.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(pdftotext, "-layout", pdfPath, textPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pdftotext: %v: %s", err, output)
+	}
+	text, err := os.ReadFile(textPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := strings.Split(string(text), "\f")
+	if len(pages) < 2 {
+		t.Fatalf("expected two pages, got %q", text)
+	}
+	for _, value := range []string{"original first", meta.Filename, meta.Filepath, "2024-06-01"} {
+		if !strings.Contains(pages[0], value) {
+			t.Errorf("first page missing %q in %q", value, pages[0])
+		}
+	}
+	if !strings.Contains(pages[1], "original second") || strings.Contains(pages[1], meta.Filename) {
+		t.Errorf("unexpected second page: %q", pages[1])
 	}
 }
 
 func TestPrepend_StripsMIMEParameters(t *testing.T) {
 	t.Parallel()
 
-	original := buildCoverPagePDF(testMeta)
+	original := buildTextPDF([]string{"original"}, 595, 842, 100)
 	var out bytes.Buffer
 	err := Prepend("application/pdf; version=1", testMeta, bytes.NewReader(original), &out)
 	if err != nil {
