@@ -4,6 +4,8 @@ run:
 
 linters:
   default: all
+  enable:
+    - gomodguard_v2
   exclusions:
     rules:
       - path: _test\.go
@@ -16,6 +18,7 @@ linters:
     - cyclop
     - exhaustive
     - exhaustruct
+    - exhaustruct_v5
     - forbidigo
     - funlen
     - gochecknoglobals
@@ -35,6 +38,7 @@ linters:
     - maintidx
 
     # i disagree with these
+    - gomodguard
     - noinlineerr
     - wrapcheck
     - nolintlint

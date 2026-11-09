@@ -1,8 +1,8 @@
 // Package filter injects document-metadata (filename, filepath, print time)
 // into print jobs intercepted by the MetaPrinter CUPS filter.
 //
-// Supported input MIME types are PDF and PostScript. PDF metadata is added on
-// a cover page, while PostScript jobs receive a PostScript cover page.
+// Supported input MIME types are PDF and PostScript. PDF metadata is overlaid
+// on the first page, while PostScript jobs receive a cover page.
 package filter
 
 import (
@@ -12,15 +12,14 @@ import (
 	"time"
 )
 
-// Metadata holds the information that is printed on the cover page.
+// Metadata holds the information printed with the document.
 type Metadata struct {
 	Filename  string
 	Filepath  string
 	PrintTime time.Time
 }
 
-// Prepend reads the document from r, prepends a metadata cover appropriate for
-// contentType, and writes the result to w.
+// Prepend reads the document from r and adds metadata appropriate for contentType.
 func Prepend(contentType string, m *Metadata, r io.Reader, w io.Writer) error {
 	ct := strings.ToLower(strings.TrimSpace(contentType))
 	// Strip parameters (e.g. "application/pdf; charset=utf-8").

@@ -22,6 +22,7 @@ func TestParseDeviceURI(t *testing.T) {
 }
 
 // Not parallel: replaces the package-level runCmd.
+//nolint:paralleltest // The test replaces package-level runCmd.
 func TestApply_RetargetsOnlyWhenURIDiffers(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "target.json")
 	if err := os.WriteFile(cfg, []byte(`{"queue":"HP"}`), 0o600); err != nil {

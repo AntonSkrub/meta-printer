@@ -1,4 +1,4 @@
-// metafilter is a CUPS print filter that prepends document metadata
+// metafilter is a CUPS print filter that adds document metadata
 // (filename, filepath, print timestamp) to every intercepted print job.
 //
 // CUPS invokes the filter as:
@@ -14,8 +14,8 @@
 //
 // The CONTENT_TYPE environment variable (set by CUPS) determines the output
 // format:
-//   - application/pdf or application/vnd.cups-pdf → PDF with a metadata
-//     cover page prepended
+//   - application/pdf or application/vnd.cups-pdf → PDF with metadata
+//     overlaid on the first page
 //   - application/postscript or application/vnd.cups-postscript → PostScript
 //     with a metadata cover page
 //   - other types use the filter's unsupported-content-type fallback

@@ -80,7 +80,7 @@ func main() {
 
 	cfg := config.Get()
 	if err := cfg.ValidateWatch(); err != nil {
-		log.Fatal().Err(err).Msg("metad: invalid config")
+		log.Error().Err(err).Msg("metad: invalid config")
 	}
 
 	dbPath := filepath.Join(cfg.DatabaseDir, cfg.DaemonDB.Name+".db")
