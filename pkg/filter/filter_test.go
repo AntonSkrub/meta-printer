@@ -157,6 +157,7 @@ func TestPrepend_PDFType(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // pdfcpu's config directory is process-global.
 func TestPrependPDF_OnlyFirstPage(t *testing.T) {
 	api.DisableConfigDir()
 	first := buildTextPDF([]string{"original first"}, 595, 842, 100)
@@ -194,6 +195,7 @@ func TestPrependPDF_OnlyFirstPage(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // pdfcpu's config directory is process-global.
 func TestPrependPDF_ExtractedText(t *testing.T) {
 	pdftotext, err := exec.LookPath("pdftotext")
 	if err != nil {
@@ -217,12 +219,12 @@ func TestPrependPDF_ExtractedText(t *testing.T) {
 	if err := os.WriteFile(pdfPath, result.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(pdftotext, "-layout", pdfPath, textPath)
+	cmd := exec.Command(pdftotext, "-layout", pdfPath, textPath) // #nosec G204 -- executable is resolved with LookPath; paths are test-owned temp files.
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("pdftotext: %v: %s", err, output)
 	}
-	text, err := os.ReadFile(textPath)
+	text, err := os.ReadFile(textPath) // #nosec G304 -- textPath is created under t.TempDir().
 	if err != nil {
 		t.Fatal(err)
 	}

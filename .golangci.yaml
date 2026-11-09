@@ -4,6 +4,8 @@ run:
 
 linters:
   default: all
+  enable:
+    - gomodguard_v2
   exclusions:
     rules:
       - path: _test\.go
@@ -36,6 +38,7 @@ linters:
     - maintidx
 
     # i disagree with these
+    - gomodguard
     - noinlineerr
     - wrapcheck
     - nolintlint
