@@ -75,7 +75,7 @@ func deviceURI(queue string) (string, error) {
 // parseDeviceURI extracts the URI from `lpstat -v` output such as
 // "device for HP_LaserJet: ipp://printer.local/ipp/print".
 func parseDeviceURI(out string) (string, error) {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "device for ")
 		if !ok {
 			continue
