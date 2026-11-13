@@ -129,9 +129,9 @@ func openInput(args []string) (io.Reader, func(), string, error) {
 			return nil, func() {}, "", err
 		}
 
-		f, err := os.Open(trustedPath) // #nosec G304 -- validated CUPS spool path via validateInputPath
+		f, err := openTrustedSpoolFile(filepath.Dir(trustedPath), filepath.Base(trustedPath))
 		if err != nil {
-			return nil, func() {}, "", err
+			return nil, func() {}, "", fmt.Errorf("open cups spool file %q: %w", trustedPath, err)
 		}
 		return f, func() {
 			if err := f.Close(); err != nil {
@@ -142,32 +142,23 @@ func openInput(args []string) (io.Reader, func(), string, error) {
 	return os.Stdin, func() {}, "", nil
 }
 
-// resolveTrustedCupsSpoolPath maps the caller-provided CUPS filename to an
-// existing file discovered from the trusted spool directory contents.
+// resolveTrustedCupsSpoolPath validates the CUPS filename without listing the
+// spool directory. The file itself is opened separately with symlinks rejected.
 func resolveTrustedCupsSpoolPath(path string) (string, error) {
+	return validateSpoolPath(path, "/var/spool/cups")
+}
+
+func validateSpoolPath(path, spoolDir string) (string, error) {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		return "", fmt.Errorf("input path must be absolute: %q", path)
 	}
 
-	const cupsSpoolDir = "/var/spool/cups"
-	if filepath.Dir(clean) != cupsSpoolDir {
-		return "", fmt.Errorf("input path must be inside %s: %q", cupsSpoolDir, path)
+	if filepath.Dir(clean) != spoolDir {
+		return "", fmt.Errorf("input path must be inside %s: %q", spoolDir, path)
 	}
 
-	wanted := filepath.Base(clean)
-	entries, err := os.ReadDir(cupsSpoolDir)
-	if err != nil {
-		return "", fmt.Errorf("read cups spool directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.Name() == wanted {
-			return filepath.Join(cupsSpoolDir, entry.Name()), nil
-		}
-	}
-
-	return "", fmt.Errorf("input file not found in %s: %q", cupsSpoolDir, wanted)
+	return clean, nil
 }
 
 // buildMetadata constructs the Metadata struct for a print job.
