@@ -3,10 +3,14 @@ package filter
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +141,67 @@ func TestPrepend_PSType(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // pdfcpu's config directory is process-global.
+func TestPrepend_ConvertedPostScriptJob(t *testing.T) {
+	api.DisableConfigDir()
+	original := buildTextPDF([]string{"original content"}, 595, 842, 100)
+	var out bytes.Buffer
+	// Use a non-seekable reader to mirror input from the preceding CUPS filter.
+	if err := Prepend("application/postscript", testMeta, struct{ io.Reader }{bytes.NewReader(original)}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(out.Bytes(), []byte("%PDF-")) {
+		t.Fatal("converted PostScript job must remain a PDF")
+	}
+	count, err := api.PageCount(bytes.NewReader(out.Bytes()), model.NewDefaultConfiguration())
+	if err != nil || count != 1 {
+		t.Fatalf("page count = %d, error = %v; want one page", count, err)
+	}
+	err = api.ExtractContent(bytes.NewReader(out.Bytes()), []string{"1"}, func(r io.Reader, _ int) error {
+		content, readErr := io.ReadAll(r)
+		if readErr != nil {
+			return readErr
+		}
+		if !bytes.Contains(content, []byte("original content")) || !bytes.Contains(content, []byte(" Do")) {
+			t.Errorf("first page must retain original content and include header stamp: %s", content)
+		}
+		return nil
+	}, model.NewDefaultConfiguration())
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepend_UsesActualPostScriptInput(t *testing.T) {
+	t.Parallel()
+	original := "%!PS-Adobe-3.0\n%%Pages: 1\n"
+	var out bytes.Buffer
+	if err := Prepend("application/pdf", testMeta, strings.NewReader(original), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "%!PS") || !strings.Contains(out.String(), original) ||
+		!strings.Contains(out.String(), "Document Metadata") {
+		t.Fatalf("expected PostScript metadata cover and original content: %q", out.String())
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("input failed") }
+
+func TestPrepend_InvalidInput(t *testing.T) {
+	t.Parallel()
+	for _, input := range []io.Reader{strings.NewReader(""), strings.NewReader("not a document"), failingReader{}} {
+		var out bytes.Buffer
+		if err := Prepend("application/postscript", testMeta, input, &out); err == nil {
+			t.Error("expected invalid or unreadable input to fail")
+		}
+		if out.Len() != 0 {
+			t.Error("invalid input produced output")
+		}
+	}
+}
+
 func TestPrepend_PDFType(t *testing.T) {
 	t.Parallel()
 
@@ -193,6 +258,24 @@ func TestPrependPDF_OnlyFirstPage(t *testing.T) {
 	if !bytes.Contains(contents[1], []byte(" Do")) {
 		t.Error("first page does not contain a stamp")
 	}
+
+	// Check the rendered stamp's top edge against the first page's top edge.
+	transform := regexp.MustCompile(`q ([0-9.]+) 0\.00000 0\.00000 [0-9.]+ [0-9.]+ ([0-9.]+) cm /\S+ gs /\S+ Do`).FindSubmatch(contents[1])
+	if transform == nil {
+		t.Fatalf("header transform not found in first page: %s", contents[1])
+	}
+	scale, err := strconv.ParseFloat(string(transform[1]), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y, err := strconv.ParseFloat(string(transform[2]), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pageHeight, headerHeight, wantOffset = 842.0, 37.0, 9.0
+	if offset := pageHeight - (y + scale*headerHeight); math.Abs(offset-wantOffset) > 0.25 {
+		t.Errorf("header top offset = %.2f points; want %.2f", offset, wantOffset)
+	}
 }
 
 //nolint:paralleltest // pdfcpu's config directory is process-global.
@@ -209,36 +292,40 @@ func TestPrependPDF_ExtractedText(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := &Metadata{Filename: "test%path (1).pdf", Filepath: "/home/user/test%path (1).pdf", PrintTime: testMeta.PrintTime}
-	var result bytes.Buffer
-	if err := Prepend("application/pdf", meta, bytes.NewReader(original.Bytes()), &result); err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	pdfPath := filepath.Join(dir, "output.pdf")
-	textPath := filepath.Join(dir, "output.txt")
-	if err := os.WriteFile(pdfPath, result.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(pdftotext, "-layout", pdfPath, textPath) // #nosec G204 -- executable is resolved with LookPath; paths are test-owned temp files.
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("pdftotext: %v: %s", err, output)
-	}
-	text, err := os.ReadFile(textPath) // #nosec G304 -- textPath is created under t.TempDir().
-	if err != nil {
-		t.Fatal(err)
-	}
-	pages := strings.Split(string(text), "\f")
-	if len(pages) < 2 {
-		t.Fatalf("expected two pages, got %q", text)
-	}
-	for _, value := range []string{"original first", meta.Filename, meta.Filepath, "2024-06-01"} {
-		if !strings.Contains(pages[0], value) {
-			t.Errorf("first page missing %q in %q", value, pages[0])
-		}
-	}
-	if !strings.Contains(pages[1], "original second") || strings.Contains(pages[1], meta.Filename) {
-		t.Errorf("unexpected second page: %q", pages[1])
+	for _, contentType := range []string{"application/pdf", "application/postscript"} {
+		t.Run(contentType, func(t *testing.T) {
+			var result bytes.Buffer
+			if err := Prepend(contentType, meta, bytes.NewReader(original.Bytes()), &result); err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			pdfPath := filepath.Join(dir, "output.pdf")
+			textPath := filepath.Join(dir, "output.txt")
+			if err := os.WriteFile(pdfPath, result.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(pdftotext, "-layout", pdfPath, textPath) // #nosec G204 -- executable is resolved with LookPath; paths are test-owned temp files.
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("pdftotext: %v: %s", err, output)
+			}
+			text, err := os.ReadFile(textPath) // #nosec G304 -- textPath is created under t.TempDir().
+			if err != nil {
+				t.Fatal(err)
+			}
+			pages := strings.Split(string(text), "\f")
+			if len(pages) < 2 {
+				t.Fatalf("expected two pages, got %q", text)
+			}
+			for _, value := range []string{"original first", meta.Filename, meta.Filepath, "2024-06-01"} {
+				if !strings.Contains(pages[0], value) {
+					t.Errorf("first page missing %q in %q", value, pages[0])
+				}
+			}
+			if !strings.Contains(pages[1], "original second") || strings.Contains(pages[1], meta.Filename) {
+				t.Errorf("unexpected second page: %q", pages[1])
+			}
+		})
 	}
 }
 
