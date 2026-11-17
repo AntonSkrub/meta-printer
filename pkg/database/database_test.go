@@ -2,6 +2,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -190,5 +191,71 @@ func TestNew_CreatesDirectory(t *testing.T) {
 
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("database file not created: %v", err)
+	}
+}
+
+func TestMarkPrintedWaitsForConcurrentWriter(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "shared.db")
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	other, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	if err := s.RecordOpen("report.pdf", "/home/user/report.pdf", "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	record, err := s.LookupByFilename("report.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := s.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.ExecContext(context.Background(), "ROLLBACK")
+
+	done := make(chan error, 1)
+	go func() { done <- other.MarkPrinted(record.ID) }()
+	select {
+	case err := <-done:
+		t.Fatalf("write returned before lock was released: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if _, err := conn.ExecContext(context.Background(), "COMMIT"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("write after lock released: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("write did not finish after lock was released")
+	}
+}
+
+func TestDatabasePathWithSpecialCharacters(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "metadata #1.db")
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("database not created at requested path: %v", err)
 	}
 }

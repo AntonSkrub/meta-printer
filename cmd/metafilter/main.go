@@ -170,7 +170,7 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 
 	store, err := database.New(filepath.Join(cfg.DatabaseDir, config.Get().DaemonDB.Name+".db"))
 	if err != nil {
-		// Database not available – use job-title metadata only.
+		log.Warn().Err(err).Msg("metafilter: open metadata database; using job title")
 		return meta
 	}
 	defer func() {

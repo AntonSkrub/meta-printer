@@ -10,6 +10,8 @@ The filter detects the format it receives, which may differ from the original jo
 
 The original path is included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
 
+The daemon caches hashes for unchanged files to prevent its own file reads from repeatedly triggering the watcher. SQLite waits briefly for concurrent writers; existing metadata history is retained and is not automatically pruned.
+
 ## Target printer
 
 The physical printer is set in `/etc/meta-printer/target.json` (root-owned), with exactly one of `queue` (CUPS queue name) or `uri` (device URI):
