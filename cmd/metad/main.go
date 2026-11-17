@@ -111,13 +111,14 @@ func main() {
 	w.Start()
 	log.Info().Str("database", dbPath).Msg("metad: started")
 
+	hashes := newFileHashCache()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 
 	for {
 		select {
 		case ev := <-w.Events:
-			hash, err := hashFile(ev.Path)
+			hash, err := hashes.hash(ev.Path)
 			if err != nil {
 				log.Warn().Err(err).Str("path", ev.Path).Msg("metad: hash file")
 			}

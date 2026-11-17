@@ -12,13 +12,10 @@
 // daemon's SQLite database at /var/lib/meta-printer/<config.Get().DaemonDB.Name>.db, falling back
 // gracefully to the job title when the database is unavailable.
 //
-// The CONTENT_TYPE environment variable (set by CUPS) determines the output
-// format:
-//   - application/pdf or application/vnd.cups-pdf → PDF with metadata
-//     overlaid on the first page
-//   - application/postscript or application/vnd.cups-postscript → PostScript
-//     with a metadata cover page
-//   - other types use the filter's unsupported-content-type fallback
+// The filter detects the format of its input stream: PDF receives metadata
+// overlaid on the first page, while PostScript receives a cover page.
+// CUPS CONTENT_TYPE describes the original job, which can differ from the
+// input after an earlier filter converts it.
 package main
 
 import (
@@ -100,11 +97,8 @@ func main() {
 
 	meta := buildMetadata(title, input, sourcePath)
 
-	// Determine content type from the CUPS environment variable.
+	// CONTENT_TYPE describes the original job, not necessarily this input.
 	contentType := os.Getenv("CONTENT_TYPE")
-	if contentType == "" {
-		contentType = "application/pdf" // safe default
-	}
 
 	if err := filter.Prepend(contentType, meta, input, os.Stdout); err != nil {
 		closeInput()
@@ -176,7 +170,7 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 
 	store, err := database.New(filepath.Join(cfg.DatabaseDir, config.Get().DaemonDB.Name+".db"))
 	if err != nil {
-		// Database not available – use job-title metadata only.
+		log.Warn().Err(err).Msg("metafilter: open metadata database; using job title")
 		return meta
 	}
 	defer func() {

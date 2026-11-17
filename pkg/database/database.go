@@ -6,8 +6,10 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -38,23 +40,32 @@ func New(path string) (*Store, error) {
 		return nil, fmt.Errorf("db: create parent directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("db: resolve path: %w", err)
+	}
+	uriPath := filepath.ToSlash(absPath)
+	if runtime.GOOS == "windows" {
+		uriPath = "/" + uriPath
+	}
+	dsn := (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "_pragma=busy_timeout%3D5000"}).String()
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: open: %w", err)
 	}
 
 	// Single-writer SQLite; enable WAL for better concurrency.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		if err = db.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "db: close: %v\n", err)
+		if closeErr := db.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "db: close: %v\n", closeErr)
 		}
 		return nil, fmt.Errorf("db: enable WAL: %w", err)
 	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		if err = s.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "db: close: %v\n", err)
+		if closeErr := s.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "db: close: %v\n", closeErr)
 		}
 		return nil, fmt.Errorf("db: migrate: %w", err)
 	}
