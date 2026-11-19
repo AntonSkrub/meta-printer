@@ -21,7 +21,7 @@ func prependPDF(m *Metadata, r io.Reader, w io.Writer) error {
 
 	header := buildHeaderPDF(m)
 	stamp, err := api.PDFWatermarkForReadSeeker(bytes.NewReader(header), 1,
-		"pos:tl, off:18 -9, scale:0.92 rel, rot:0", true, false, types.POINTS)
+		"pos:tl, off:10 -3.175, scale:0.92 rel, rot:0", true, false, types.MILLIMETRES)
 	if err != nil {
 		return fmt.Errorf("pdf: create header: %w", err)
 	}

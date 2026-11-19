@@ -7,6 +7,7 @@ The Meta-Printer is a background application that intercepts print jobs and adds
 - **PostScript:** a PostScript metadata cover page is prepended ahead of the original document.
 
 The filter detects the format it receives, which may differ from the original job format after CUPS conversion. For example, an Okular PostScript job converted to PDF receives the PDF header.
+The PDF header starts approximately 10 mm from the left and 5 mm from the top of the page. Print scaling, page geometry and the printer's unprintable margins can affect its physical position or clip it.
 
 The original path is included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
 

@@ -172,6 +172,46 @@ func TestPrepend_ConvertedPostScriptJob(t *testing.T) {
 	}
 }
 
+//nolint:paralleltest // pdfcpu's config directory is process-global.
+func TestPrepend_ConvertedPostScriptUsesPDFPlacement(t *testing.T) {
+	for _, page := range []struct {
+		name          string
+		width, height int
+	}{
+		{"A4", 595, 842},
+		{"Letter", 612, 792},
+	} {
+		t.Run(page.name, func(t *testing.T) {
+			original := buildTextPDF([]string{"original content"}, page.width, page.height, 100)
+			var transforms []string
+			for _, contentType := range []string{"application/pdf", "application/postscript"} {
+				var output bytes.Buffer
+				if err := Prepend(contentType, testMeta, bytes.NewReader(original), &output); err != nil {
+					t.Fatal(err)
+				}
+				err := api.ExtractContent(bytes.NewReader(output.Bytes()), []string{"1"}, func(r io.Reader, _ int) error {
+					content, err := io.ReadAll(r)
+					if err != nil {
+						return err
+					}
+					transform := regexp.MustCompile(`q [0-9.]+ 0\.00000 0\.00000 [0-9.]+ [0-9.]+ [0-9.]+ cm /\S+ gs /\S+ Do`).Find(content)
+					if transform == nil {
+						return errors.New("header transform not found")
+					}
+					transforms = append(transforms, string(transform))
+					return nil
+				}, model.NewDefaultConfiguration())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if transforms[0] != transforms[1] {
+				t.Errorf("header placements differ: %q and %q", transforms[0], transforms[1])
+			}
+		})
+	}
+}
+
 func TestPrepend_UsesActualPostScriptInput(t *testing.T) {
 	t.Parallel()
 	original := "%!PS-Adobe-3.0\n%%Pages: 1\n"
@@ -260,7 +300,7 @@ func TestPrependPDF_OnlyFirstPage(t *testing.T) {
 	}
 
 	// Check the rendered stamp's top edge against the first page's top edge.
-	transform := regexp.MustCompile(`q ([0-9.]+) 0\.00000 0\.00000 [0-9.]+ [0-9.]+ ([0-9.]+) cm /\S+ gs /\S+ Do`).FindSubmatch(contents[1])
+	transform := regexp.MustCompile(`q ([0-9.]+) 0\.00000 0\.00000 [0-9.]+ ([0-9.]+) ([0-9.]+) cm /\S+ gs /\S+ Do`).FindSubmatch(contents[1])
 	if transform == nil {
 		t.Fatalf("header transform not found in first page: %s", contents[1])
 	}
@@ -268,7 +308,14 @@ func TestPrependPDF_OnlyFirstPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	y, err := strconv.ParseFloat(string(transform[2]), 64)
+	x, err := strconv.ParseFloat(string(transform[2]), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(x-10*72/25.4) > 0.25 {
+		t.Errorf("header left offset = %.2f points; want 10 mm", x)
+	}
+	y, err := strconv.ParseFloat(string(transform[3]), 64)
 	if err != nil {
 		t.Fatal(err)
 	}
