@@ -25,7 +25,7 @@ const DefaultDatabaseDir = "/var/lib/meta-printer"
 // Config holds all configurable values for Meta-Printer.
 type Config struct {
 	LogLevel int8 `usage:"(0 = debug, 1 = info, 2 = warn, 3 = error, 4 = fatal, 5 = panic)"`
-	// WatchDirs is the list of directories monitored by metad for file-open events.
+	// WatchDirs lists directories recursively monitored by metad for file-open events.
 	WatchDirs []string `usage:"list of directories to watch for file-open events"`
 	// DaemonDB is the database configuration for the application used by both metad and metafilter.
 	// stores file-open events detected by metad and read by metafilter at print time.

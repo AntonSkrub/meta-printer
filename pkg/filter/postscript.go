@@ -12,7 +12,10 @@ import (
 // The cover page is a minimal valid PostScript program that renders the
 // metadata text and then ejects the page before the original document begins.
 func prependPostScript(m *Metadata, r io.Reader, w io.Writer) error {
-	cover := buildPSCoverPage(m)
+	cover, err := buildPSCoverPage(m)
+	if err != nil {
+		return err
+	}
 	if _, err := fmt.Fprint(w, cover); err != nil {
 		return fmt.Errorf("postscript: write cover: %w", err)
 	}
@@ -24,7 +27,7 @@ func prependPostScript(m *Metadata, r io.Reader, w io.Writer) error {
 
 // buildPSCoverPage returns a PostScript program that renders one cover page
 // with the document metadata.
-func buildPSCoverPage(m *Metadata) string {
+func buildPSCoverPage(m *Metadata) (string, error) {
 	var sb strings.Builder
 	lines := headerLines(m)
 	sb.WriteString("%!PS-Adobe-3.0\n")
@@ -38,12 +41,15 @@ func buildPSCoverPage(m *Metadata) string {
 			y -= 10
 			continue
 		}
+		if y < 14 {
+			return "", fmt.Errorf("postscript: metadata does not fit on the cover page")
+		}
 		fmt.Fprintf(&sb, "50 %d moveto (%s) show\n", y, psEscapeString(l))
 		y -= 20
 	}
 	sb.WriteString("showpage\n")
 	sb.WriteString("%%EndPage\n")
-	return sb.String()
+	return sb.String(), nil
 }
 
 // psEscapeString escapes special characters in a PostScript string literal.

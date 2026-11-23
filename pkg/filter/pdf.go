@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
@@ -19,9 +21,36 @@ func prependPDF(m *Metadata, r io.Reader, w io.Writer) error {
 		return fmt.Errorf("pdf: read input: %w", err)
 	}
 
-	header := buildHeaderPDF(m)
+	ctx, err := api.ReadAndValidate(bytes.NewReader(original), model.NewDefaultConfiguration())
+	if err != nil {
+		return fmt.Errorf("pdf: read page geometry: %w", err)
+	}
+	_, _, attrs, err := ctx.PageDict(1, false)
+	if err != nil {
+		return fmt.Errorf("pdf: read first page: %w", err)
+	}
+	box := attrs.MediaBox
+	if attrs.CropBox != nil {
+		box = attrs.CropBox
+	}
+	width, height := box.Width(), box.Height()
+	if attrs.Rotate%180 != 0 {
+		width, height = height, width
+	}
+	const pointsPerMM = 72.0 / 25.4
+	maxRunes := int(math.Floor((math.Floor(width - 20*pointsPerMM)) / 4.8))
+	if maxRunes > 90 {
+		maxRunes = 90
+	}
+	if maxRunes < 1 {
+		return fmt.Errorf("pdf: page is too narrow for the metadata header")
+	}
+	header, headerHeight := buildHeaderPDF(m, maxRunes)
+	if float64(headerHeight)+3.175*pointsPerMM > height {
+		return fmt.Errorf("pdf: metadata header does not fit on the first page")
+	}
 	stamp, err := api.PDFWatermarkForReadSeeker(bytes.NewReader(header), 1,
-		"pos:tl, off:10 -3.175, scale:0.92 rel, rot:0", true, false, types.MILLIMETRES)
+		"pos:tr, off:-10 -3.175, scale:1 abs, rot:0", true, false, types.MILLIMETRES)
 	if err != nil {
 		return fmt.Errorf("pdf: create header: %w", err)
 	}
@@ -33,25 +62,26 @@ func prependPDF(m *Metadata, r io.Reader, w io.Writer) error {
 
 // buildHeaderPDF produces a small PDF stamp, rather than a full-size page.
 // The stamp is placed over the existing page content, not added as a page.
-func buildHeaderPDF(m *Metadata) []byte {
-	const maxLineRunes = 90
+func buildHeaderPDF(m *Metadata, maxLineRunes int) ([]byte, int) {
 	values := []string{
 		"Filename: " + m.Filename,
 		"Path: " + m.Filepath,
-		"Printed: " + m.PrintTime.Format("2006-01-02 15:04:05 MST"),
 	}
 	var lines []string
 	for _, value := range values {
-		value = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(value)
-		runes := []rune(value)
-		for len(runes) > maxLineRunes {
-			lines = append(lines, string(runes[:maxLineRunes]))
-			runes = runes[maxLineRunes:]
+		lines = append(lines, wrapHeaderLine(value, maxLineRunes)...)
+	}
+	maxWidth := 0
+	for _, line := range lines {
+		if width := len([]rune(line)); width > maxWidth {
+			maxWidth = width
 		}
-		lines = append(lines, string(runes))
 	}
 
-	return buildTextPDF(lines, 550, len(lines)*11+4, 0)
+	// Courier's glyph width is 0.6 em at an 8-point font size.
+	width := int(math.Ceil(float64(maxWidth) * 4.8))
+	height := len(lines)*11 + 4
+	return buildTextPDF(lines, width, height, 0), height
 }
 
 func buildTextPDF(lines []string, width, height, topInset int) []byte {

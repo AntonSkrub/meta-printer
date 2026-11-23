@@ -1,5 +1,5 @@
 # meta-printer
-The Meta-Printer is a background application that intercepts print jobs and adds metadata (filename, filepath and print time) to the print output without modifying the original document.
+The Meta-Printer is a background application that intercepts print jobs and adds metadata (filename and filepath) to the print output without modifying the original document.
 
 ## Supported print formats
 
@@ -7,11 +7,14 @@ The Meta-Printer is a background application that intercepts print jobs and adds
 - **PostScript:** a PostScript metadata cover page is prepended ahead of the original document.
 
 The filter detects the format it receives, which may differ from the original job format after CUPS conversion. For example, an Okular PostScript job converted to PDF receives the PDF header.
-The PDF header starts approximately 10 mm from the left and 5 mm from the top of the page. Print scaling, page geometry and the printer's unprintable margins can affect its physical position or clip it.
+The PDF header is left-aligned at the top-right, approximately 10 mm from the right and 5 mm from the top of the page. Long paths wrap across lines. Print scaling, page geometry and the printer's unprintable margins can affect its physical position or clip it.
+If the metadata is too long to fit on the first PDF page or PostScript cover, the filter reports an error instead of silently cutting it off.
 
 The original filename and path are included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
 
 The daemon caches hashes for unchanged files to prevent its own file reads from repeatedly triggering the watcher. SQLite waits briefly for concurrent writers; existing metadata history is retained and is not automatically pruned.
+
+The daemon watches configured directories and their subdirectories, including directories created or moved into them later. Symbolic links to directories are not followed. Inotify cannot guarantee capturing file opens that happen before a newly created directory's watch is installed.
 
 ## Target printer
 

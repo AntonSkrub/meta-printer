@@ -1,4 +1,4 @@
-// Package filter injects document-metadata (filename, filepath, print time)
+// Package filter injects document metadata (filename and filepath)
 // into print jobs intercepted by the MetaPrinter CUPS filter.
 //
 // Supported input MIME types are PDF and PostScript. PDF metadata is overlaid
@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -49,14 +50,24 @@ func Prepend(contentType string, m *Metadata, r io.Reader, w io.Writer) error {
 
 // headerLines returns the metadata lines used in text-based headers.
 func headerLines(m *Metadata) []string {
-	return []string{
+	lines := []string{
 		"========================================",
 		"  Document Metadata",
 		"========================================",
-		"  Filename : " + m.Filename,
-		"  Path     : " + m.Filepath,
-		"  Printed  : " + m.PrintTime.Format("2006-01-02 15:04:05 MST"),
-		"========================================",
-		"",
 	}
+	for _, value := range []string{"  Filename : " + m.Filename, "  Path     : " + m.Filepath} {
+		lines = append(lines, wrapHeaderLine(value, 35)...)
+	}
+	return append(lines, "========================================", "")
+}
+
+func wrapHeaderLine(value string, maxRunes int) []string {
+	value = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(value)
+	runes := []rune(value)
+	var lines []string
+	for len(runes) > maxRunes {
+		lines = append(lines, string(runes[:maxRunes]))
+		runes = runes[maxRunes:]
+	}
+	return append(lines, string(runes))
 }

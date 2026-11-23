@@ -79,20 +79,24 @@ func TestPDFString_NonASCII(t *testing.T) {
 func TestBuildHeaderPDF_ContainsMetadata(t *testing.T) {
 	t.Parallel()
 
-	data := buildHeaderPDF(testMeta)
-	for _, want := range []string{"report.pdf", "/home/user", "2024-06-01", "BT", "ET", "%PDF-", "%%EOF"} {
+	data, _ := buildHeaderPDF(testMeta, 90)
+	for _, want := range []string{"report.pdf", "/home/user", "BT", "ET", "%PDF-", "%%EOF"} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Errorf("header PDF missing %q", want)
 		}
+	}
+	if bytes.Contains(data, []byte("Printed:")) || bytes.Contains(data, []byte("2024-06-01")) {
+		t.Error("header contains print time")
 	}
 }
 
 func TestBuildHeaderPDF_WrapsLongValues(t *testing.T) {
 	t.Parallel()
 
-	data := buildHeaderPDF(&Metadata{Filepath: strings.Repeat("a", 100)})
+	data, _ := buildHeaderPDF(&Metadata{Filepath: strings.Repeat("a", 200)}, 90)
 	if !bytes.Contains(data, []byte(strings.Repeat("a", 84))) ||
-		!bytes.Contains(data, []byte(strings.Repeat("a", 16))) {
+		!bytes.Contains(data, []byte(strings.Repeat("a", 90))) ||
+		!bytes.Contains(data, []byte(strings.Repeat("a", 26))) {
 		t.Error("long path was not wrapped")
 	}
 }
@@ -113,6 +117,34 @@ func TestPrependPostScript(t *testing.T) {
 	}
 	if !strings.Contains(result, original) {
 		t.Error("PostScript output missing original document content")
+	}
+	if strings.Contains(result, "Printed") || strings.Contains(result, "2024-06-01") {
+		t.Error("PostScript cover contains print time")
+	}
+}
+
+func TestPrependPostScriptWrapsLongPath(t *testing.T) {
+	t.Parallel()
+	meta := &Metadata{Filepath: strings.Repeat("x", 80)}
+	var out bytes.Buffer
+	if err := prependPostScript(meta, strings.NewReader("%!PS\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "(  Path     : "+strings.Repeat("x", 22)+") show") ||
+		!strings.Contains(out.String(), "("+strings.Repeat("x", 35)+") show") ||
+		!strings.Contains(out.String(), "("+strings.Repeat("x", 23)+") show") {
+		t.Fatal("PostScript path was not wrapped")
+	}
+}
+
+func TestPrependPostScriptRejectsOversizedHeader(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	if err := prependPostScript(&Metadata{Filepath: strings.Repeat("x", 2000)}, strings.NewReader("%!PS\n"), &out); err == nil {
+		t.Fatal("expected an error when the header cannot fit")
+	}
+	if out.Len() != 0 {
+		t.Fatal("oversized header produced output")
 	}
 }
 
@@ -312,16 +344,96 @@ func TestPrependPDF_OnlyFirstPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(x-10*72/25.4) > 0.25 {
-		t.Errorf("header left offset = %.2f points; want 10 mm", x)
+	const pageWidth = 595.0
+	headerWidth := math.Ceil(float64(len([]rune("Path: "+testMeta.Filepath))) * 4.8)
+	if offset := pageWidth - (x + scale*headerWidth); math.Abs(offset-10*72/25.4) > 0.25 {
+		t.Errorf("header right offset = %.2f points; want 10 mm", offset)
 	}
 	y, err := strconv.ParseFloat(string(transform[3]), 64)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pageHeight, headerHeight, wantOffset = 842.0, 37.0, 9.0
+	const pageHeight, headerHeight, wantOffset = 842.0, 26.0, 9.0
 	if offset := pageHeight - (y + scale*headerHeight); math.Abs(offset-wantOffset) > 0.25 {
 		t.Errorf("header top offset = %.2f points; want %.2f", offset, wantOffset)
+	}
+}
+
+//nolint:paralleltest // pdfcpu's config directory is process-global.
+func TestPrependPDF_NarrowPageWrapsWithinMargins(t *testing.T) {
+	original := buildTextPDF([]string{"original"}, 200, 842, 100)
+	meta := &Metadata{Filename: "file.pdf", Filepath: strings.Repeat("a", 160)}
+	var out bytes.Buffer
+	if err := Prepend("application/pdf", meta, bytes.NewReader(original), &out); err != nil {
+		t.Fatal(err)
+	}
+	err := api.ExtractContent(bytes.NewReader(out.Bytes()), []string{"1"}, func(r io.Reader, _ int) error {
+		content, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		transform := regexp.MustCompile(`q ([0-9.]+) 0\.00000 0\.00000 [0-9.]+ ([0-9.]+) ([0-9.]+) cm /\S+ gs /\S+ Do`).FindSubmatch(content)
+		if transform == nil {
+			t.Fatalf("header transform not found: %s", content)
+		}
+		x, err := strconv.ParseFloat(string(transform[2]), 64)
+		if err != nil {
+			return err
+		}
+		if x < 10*72/25.4-0.25 {
+			t.Errorf("header extends into the left margin: x=%.2f", x)
+		}
+		return nil
+	}, model.NewDefaultConfiguration())
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+//nolint:paralleltest // pdfcpu's config directory is process-global.
+func TestPrependPDF_RejectsOversizedHeader(t *testing.T) {
+	original := buildTextPDF([]string{"original"}, 200, 200, 20)
+	var out bytes.Buffer
+	if err := Prepend("application/pdf", &Metadata{Filepath: strings.Repeat("x", 2000)}, bytes.NewReader(original), &out); err == nil {
+		t.Fatal("expected an error when the header cannot fit")
+	}
+	if out.Len() != 0 {
+		t.Fatal("oversized header produced output")
+	}
+}
+
+//nolint:paralleltest // pdfcpu's config directory is process-global.
+func TestPrependPDF_RotatedPageRightAlignment(t *testing.T) {
+	original := buildTextPDF([]string{"original"}, 595, 842, 100)
+	var rotated bytes.Buffer
+	if err := api.Rotate(bytes.NewReader(original), &rotated, 90, []string{"1"}, model.NewDefaultConfiguration()); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Prepend("application/pdf", testMeta, bytes.NewReader(rotated.Bytes()), &out); err != nil {
+		t.Fatal(err)
+	}
+	err := api.ExtractContent(bytes.NewReader(out.Bytes()), []string{"1"}, func(r io.Reader, _ int) error {
+		content, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		transform := regexp.MustCompile(`q ([0-9.]+) 0\.00000 0\.00000 [0-9.]+ ([0-9.]+) ([0-9.]+) cm /\S+ gs /\S+ Do`).FindSubmatch(content)
+		if transform == nil {
+			t.Fatalf("header transform not found: %s", content)
+		}
+		x, err := strconv.ParseFloat(string(transform[2]), 64)
+		if err != nil {
+			return err
+		}
+		width := math.Ceil(float64(len([]rune("Path: "+testMeta.Filepath))) * 4.8)
+		if offset := 842 - x - width; math.Abs(offset-10*72/25.4) > 0.25 {
+			t.Errorf("rotated page header right offset = %.2f points", offset)
+		}
+		return nil
+	}, model.NewDefaultConfiguration())
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -364,15 +476,48 @@ func TestPrependPDF_ExtractedText(t *testing.T) {
 			if len(pages) < 2 {
 				t.Fatalf("expected two pages, got %q", text)
 			}
-			for _, value := range []string{"original first", meta.Filename, meta.Filepath, "2024-06-01"} {
+			for _, value := range []string{"original first", meta.Filename, meta.Filepath} {
 				if !strings.Contains(pages[0], value) {
 					t.Errorf("first page missing %q in %q", value, pages[0])
+				}
+				if strings.Contains(pages[0], "Printed:") || strings.Contains(pages[0], "2024-06-01") {
+					t.Error("first page contains print time")
 				}
 			}
 			if !strings.Contains(pages[1], "original second") || strings.Contains(pages[1], meta.Filename) {
 				t.Errorf("unexpected second page: %q", pages[1])
 			}
 		})
+	}
+}
+
+//nolint:paralleltest // pdfcpu's config directory is process-global.
+func TestPrependPDF_ExtractedWrappedPath(t *testing.T) {
+	pdftotext, err := exec.LookPath("pdftotext")
+	if err != nil {
+		t.Skip("pdftotext is not installed")
+	}
+	original := buildTextPDF([]string{"original"}, 595, 842, 100)
+	var out bytes.Buffer
+	if err := Prepend("application/pdf", &Metadata{Filename: "file.pdf", Filepath: strings.Repeat("x", 150)}, bytes.NewReader(original), &out); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	pdfPath, textPath := filepath.Join(dir, "wrapped.pdf"), filepath.Join(dir, "wrapped.txt")
+	if err := os.WriteFile(pdfPath, out.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(pdftotext, "-layout", pdfPath, textPath) // #nosec G204 -- executable and files are trusted.
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("pdftotext: %v: %s", err, output)
+	}
+	text, err := os.ReadFile(textPath) // #nosec G304 -- file is under t.TempDir().
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern := `Path: x{84}\s+x{66}`
+	if !regexp.MustCompile(pattern).Match(text) {
+		t.Fatalf("wrapped path not present in extracted text: %q", text)
 	}
 }
 

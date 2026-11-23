@@ -1,5 +1,5 @@
 // metafilter is a CUPS print filter that adds document metadata
-// (filename, filepath, print timestamp) to every intercepted print job.
+// (filename and filepath) to every intercepted print job.
 //
 // CUPS invokes the filter as:
 //

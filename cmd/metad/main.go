@@ -104,7 +104,7 @@ func main() {
 
 	for _, dir := range cfg.WatchDirs {
 		if err := w.Add(dir); err != nil {
-			log.Warn().Err(err).Str("dir", dir).Msg("metad: cannot watch directory")
+			log.Warn().Err(err).Str("dir", dir).Msg("metad: cannot watch directory tree completely")
 		} else {
 			log.Debug().Str("dir", dir).Msg("metad: watching")
 		}

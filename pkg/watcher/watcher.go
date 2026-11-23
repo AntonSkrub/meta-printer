@@ -4,9 +4,13 @@
 package watcher
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -29,6 +33,8 @@ type Event struct {
 // file type is opened.
 type Watcher struct {
 	fd     int
+	mu     sync.Mutex
+	wg     sync.WaitGroup
 	wds    map[int]string // inotify watch descriptor → directory
 	Events chan Event
 	Errors chan error
@@ -37,7 +43,7 @@ type Watcher struct {
 
 // New creates a new Watcher. Call Add to register directories, then Start.
 func New() (*Watcher, error) {
-	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC)
+	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		return nil, err
 	}
@@ -50,43 +56,125 @@ func New() (*Watcher, error) {
 	}, nil
 }
 
-// Add starts watching path for IN_OPEN events.
+// Add watches path and its existing subdirectories without following symlinks.
 func (w *Watcher) Add(path string) error {
-	wd, err := unix.InotifyAddWatch(w.fd, path, unix.IN_OPEN)
+	path, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
-	w.wds[wd] = path
-	return nil
+	return w.addTree(path)
+}
+
+func (w *Watcher) addTree(root string) error {
+	var failures []error
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			failures = append(failures, fmt.Errorf("watch %q: %w", path, walkErr))
+			return nil
+		}
+		if !entry.IsDir() {
+			if path == root {
+				failures = append(failures, fmt.Errorf("watch %q: not a directory or is a symlink", path))
+			}
+			return nil
+		}
+		w.mu.Lock()
+		wd, err := unix.InotifyAddWatch(w.fd, path, unix.IN_OPEN|unix.IN_CREATE|unix.IN_MOVED_TO|
+			unix.IN_MOVED_FROM|unix.IN_DELETE|unix.IN_DELETE_SELF|unix.IN_MOVE_SELF|unix.IN_ONLYDIR|unix.IN_DONT_FOLLOW)
+		if err == nil {
+			w.wds[wd] = path
+		}
+		w.mu.Unlock()
+		if err != nil {
+			failures = append(failures, fmt.Errorf("watch %q: %w", path, err))
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
+}
+
+func (w *Watcher) removeTree(root string) {
+	w.mu.Lock()
+	var failures []error
+	for wd, path := range w.wds {
+		if path != root && !strings.HasPrefix(path, root+string(filepath.Separator)) {
+			continue
+		}
+		delete(w.wds, wd)
+		if _, err := unix.InotifyRmWatch(w.fd, uint32(wd)); err != nil && !errors.Is(err, unix.EINVAL) {
+			failures = append(failures, fmt.Errorf("unwatch %q: %w", path, err))
+		}
+	}
+	w.mu.Unlock()
+	for _, err := range failures {
+		w.reportError(err)
+	}
+}
+
+func (w *Watcher) reportError(err error) {
+	select {
+	case w.Errors <- err:
+	default:
+		fmt.Fprintln(os.Stderr, err)
+	}
 }
 
 // Start launches the event-reading goroutine.
 func (w *Watcher) Start() {
+	w.wg.Add(1)
 	go w.readEvents()
 }
 
 // Stop signals the goroutine to exit and releases the inotify file descriptor.
 func (w *Watcher) Stop() {
 	close(w.done)
+	w.wg.Wait()
 	err := unix.Close(w.fd)
 	if err != nil {
-		select {
-		case w.Errors <- fmt.Errorf("watcher: close fd: %w", err):
-		default:
-		}
+		w.reportError(fmt.Errorf("watcher: close fd: %w", err))
 	}
 }
 
 func (w *Watcher) readEvents() {
+	defer w.wg.Done()
 	// buf must be large enough for at least one inotify_event + NAME_MAX bytes.
 	buf := make([]byte, 4096)
 	for {
+		select {
+		case <-w.done:
+			return
+		default:
+		}
+		fds := []unix.PollFd{{Fd: int32(w.fd), Events: unix.POLLIN}}
+		ready, err := unix.Poll(fds, 200)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if err != nil {
+			w.reportError(fmt.Errorf("watcher: poll: %w", err))
+			return
+		}
+		if ready == 0 {
+			continue
+		}
+		if fds[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+			w.reportError(fmt.Errorf("watcher: unexpected poll events: %d", fds[0].Revents))
+			return
+		}
 		n, err := unix.Read(w.fd, buf)
+		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
+			continue
+		}
 		if err != nil {
 			select {
 			case <-w.done:
 				// Shutdown triggered – expected error from Close(fd).
-			case w.Errors <- err:
+			default:
+				w.reportError(err)
 			}
 			return
 		}
@@ -109,25 +197,53 @@ func (w *Watcher) readEvents() {
 
 			offset += unix.SizeofInotifyEvent + nameLen
 
-			// Only care about opens of regular files (not directories).
-			if mask&unix.IN_OPEN == 0 || mask&unix.IN_ISDIR != 0 || name == "" {
+			if mask&unix.IN_Q_OVERFLOW != 0 {
+				w.reportError(errors.New("watcher: inotify queue overflow; events were lost, restart metad"))
 				continue
 			}
 
+			w.mu.Lock()
+			dir, watched := w.wds[wd]
+			if mask&unix.IN_IGNORED != 0 {
+				delete(w.wds, wd)
+			}
+			w.mu.Unlock()
+			if !watched {
+				continue
+			}
+			if mask&unix.IN_IGNORED != 0 {
+				continue
+			}
+			if mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
+				w.removeTree(dir)
+				w.reportError(fmt.Errorf("watcher: watched directory %q moved or removed", dir))
+				continue
+			}
+			if mask&unix.IN_ISDIR != 0 && name != "" {
+				path := filepath.Join(dir, name)
+				if mask&(unix.IN_MOVED_FROM|unix.IN_DELETE) != 0 {
+					w.removeTree(path)
+				}
+				if mask&(unix.IN_CREATE|unix.IN_MOVED_TO) != 0 {
+					if err := w.addTree(path); err != nil {
+						w.reportError(err)
+					}
+				}
+				continue
+			}
+			if mask&unix.IN_OPEN == 0 || name == "" {
+				continue
+			}
 			ext := strings.ToLower(filepath.Ext(name))
 			if !supportedExts[ext] {
 				continue
 			}
 
-			dir := w.wds[wd]
 			fullPath := filepath.Join(dir, name)
 			ev := Event{Name: name, Path: fullPath}
 
 			if deviceID, inodeNum, err := statIdentity(fullPath); err != nil {
-				select {
-				case w.Errors <- fmt.Errorf("watcher: stat %q: %w", fullPath, err):
-				default:
-				}
+				w.reportError(fmt.Errorf("watcher: stat %q: %w", fullPath, err))
 			} else {
 				ev.DeviceID = deviceID
 				ev.InodeNum = inodeNum
@@ -136,7 +252,7 @@ func (w *Watcher) readEvents() {
 			select {
 			case w.Events <- ev:
 			default:
-				// Channel full – discard event.
+				w.reportError(fmt.Errorf("watcher: event queue full; lost open event for %q", fullPath))
 			}
 		}
 	}
