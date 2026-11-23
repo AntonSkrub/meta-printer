@@ -4,6 +4,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,7 +31,7 @@ func TestRecordAndLookup(t *testing.T) {
 
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("report.pdf", "/home/user/docs/report.pdf", "", 0, 0); err != nil {
+	if err := s.RecordOpen("report.pdf", "/home/user/docs/report.pdf", "", "", 0, 0); err != nil {
 		t.Fatalf("RecordOpen: %v", err)
 	}
 
@@ -50,17 +51,93 @@ func TestRecordAndLookup(t *testing.T) {
 	}
 }
 
+func TestLookupByJobTitle(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	for i := 0; i < 2; i++ {
+		if err := s.RecordOpen("three-page.pdf", "/docs/three-page.pdf", "", "Sample PDF", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record, err := s.LookupByJobTitle("Sample PDF")
+	if err != nil || record.Filename != "three-page.pdf" {
+		t.Fatalf("lookup = %+v, %v", record, err)
+	}
+	record, err = s.LookupByJobTitle("three-page.pdf")
+	if err != nil || record.Filepath != "/docs/three-page.pdf" {
+		t.Fatalf("filename lookup = %+v, %v", record, err)
+	}
+	record, err = s.LookupByJobTitle("/docs/three-page.pdf")
+	if err != nil || record.Filepath != "/docs/three-page.pdf" {
+		t.Fatalf("path-shaped job title lookup = %+v, %v", record, err)
+	}
+	if err := s.RecordOpen("other.pdf", "/docs/other.pdf", "", "Sample PDF", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupByJobTitle("Sample PDF"); !errors.Is(err, ErrAmbiguousJobTitle) {
+		t.Fatalf("duplicate title: %v", err)
+	}
+	if err := s.RecordOpen("other.pdf", "/docs/other.pdf", "", "New title", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupByJobTitle("Sample PDF"); err != nil {
+		t.Fatalf("old title should not make a current match ambiguous: %v", err)
+	}
+	if err := s.RecordOpen("Sample PDF", "/docs/Sample PDF", "", "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupByJobTitle("Sample PDF"); !errors.Is(err, ErrAmbiguousJobTitle) {
+		t.Fatalf("title/filename collision: %v", err)
+	}
+	if _, err := s.LookupByJobTitle("missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing title: %v", err)
+	}
+}
+
+func TestMigrationPreservesExistingRecords(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE file_metadata (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, filepath TEXT NOT NULL,
+		file_hash TEXT, dev_id TEXT, inode_num TEXT, opened_at DATETIME NOT NULL, printed_at DATETIME
+	); INSERT INTO file_metadata (filename, filepath, opened_at) VALUES ('old.pdf', '/docs/old.pdf', CURRENT_TIMESTAMP)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.LookupByJobTitle("old.pdf"); err != nil {
+		t.Fatalf("old record: %v", err)
+	}
+	if err := s.RecordOpen("new.pdf", "/docs/new.pdf", "", "New title", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupByJobTitle("New title"); err != nil {
+		t.Fatalf("new title: %v", err)
+	}
+}
+
 func TestLookupReturnsLatest(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("doc.txt", "/old/doc.txt", "", 0, 0); err != nil {
+	if err := s.RecordOpen("doc.txt", "/old/doc.txt", "", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	// Ensure the second record has a strictly later timestamp.
 	time.Sleep(2 * time.Millisecond)
-	if err := s.RecordOpen("doc.txt", "/new/doc.txt", "", 0, 0); err != nil {
+	if err := s.RecordOpen("doc.txt", "/new/doc.txt", "", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,7 +155,7 @@ func TestMarkPrinted(t *testing.T) {
 
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("file.docx", "/tmp/file.docx", "", 0, 0); err != nil {
+	if err := s.RecordOpen("file.docx", "/tmp/file.docx", "", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	m, err := s.LookupByFilename("file.docx")
@@ -114,10 +191,10 @@ func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
 
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-desktop", 2050, 382174); err != nil {
+	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-desktop", "", 2050, 382174); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-documents", 2050, 445192); err != nil {
+	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-documents", "", 2050, 445192); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,10 +228,10 @@ func TestLookupByDevInode(t *testing.T) {
 
 	s := newTestStore(t)
 
-	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-open", 2050, 382174); err != nil {
+	if err := s.RecordOpen("invoice.pdf", "/home/user/desktop/invoice.pdf", "hash-open", "", 2050, 382174); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-edited", 2050, 382174); err != nil {
+	if err := s.RecordOpen("invoice.pdf", "/home/user/documents/invoice.pdf", "hash-edited", "", 2050, 382174); err != nil {
 		t.Fatal(err)
 	}
 
@@ -207,7 +284,7 @@ func TestMarkPrintedWaitsForConcurrentWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = other.Close() })
-	if err := s.RecordOpen("report.pdf", "/home/user/report.pdf", "", 0, 0); err != nil {
+	if err := s.RecordOpen("report.pdf", "/home/user/report.pdf", "", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	record, err := s.LookupByFilename("report.pdf")

@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -179,6 +180,10 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 		}
 	}()
 
+	return lookupMetadata(store, meta, title, input, sourcePath)
+}
+
+func lookupMetadata(store *database.Store, meta *filter.Metadata, title string, input io.Reader, sourcePath string) *filter.Metadata {
 	if sourcePath != "" {
 		sourceHash := ""
 		if rs, ok := input.(io.ReadSeeker); ok {
@@ -196,6 +201,7 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 		if deviceID, inodeNum, err := statIdentity(sourcePath); err != nil {
 			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: stat input")
 		} else if record, err := store.LookupByDevInode(deviceID, inodeNum); err == nil {
+			meta.Filename = record.Filename
 			meta.Filepath = record.Filepath
 			if err := store.MarkPrinted(record.ID); err != nil {
 				log.Error().Err(err).Msg("metafilter: mark printed")
@@ -207,6 +213,7 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 
 		if sourceHash != "" {
 			if record, err := store.LookupByFileHash(sourceHash); err == nil {
+				meta.Filename = record.Filename
 				meta.Filepath = record.Filepath
 				if err := store.MarkPrinted(record.ID); err != nil {
 					log.Error().Err(err).Msg("metafilter: mark printed")
@@ -218,10 +225,12 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 		}
 	}
 
-	record, err := store.LookupByFilename(meta.Filename)
+	record, err := store.LookupByJobTitle(title)
 	if err != nil {
-		if err != sql.ErrNoRows {
-			log.Error().Err(err).Msg("metafilter: db lookup")
+		if errors.Is(err, database.ErrAmbiguousJobTitle) {
+			log.Warn().Str("title", title).Msg("metafilter: ambiguous job title; using job title")
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			log.Error().Err(err).Msg("metafilter: db job title lookup")
 		}
 		return meta
 	}
@@ -229,7 +238,7 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 	if err := store.MarkPrinted(record.ID); err != nil {
 		log.Error().Err(err).Msg("metafilter: mark printed")
 	}
-	// Enrich with the full path recorded by the daemon.
+	meta.Filename = record.Filename
 	meta.Filepath = record.Filepath
 	return meta
 }

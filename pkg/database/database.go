@@ -5,6 +5,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -32,6 +33,9 @@ type FileMetadata struct {
 type Store struct {
 	db *sql.DB
 }
+
+// ErrAmbiguousJobTitle means multiple files match a job title.
+var ErrAmbiguousJobTitle = errors.New("job title matches multiple files")
 
 // New opens (or creates) the SQLite database at path, creating any parent
 // directories as needed, and runs the schema migration.
@@ -73,7 +77,7 @@ func New(path string) (*Store, error) {
 }
 
 // RecordOpen stores metadata for a file that was just opened.
-func (s *Store) RecordOpen(filename, filePath, fileHash string, deviceID, inodeNum uint64) error {
+func (s *Store) RecordOpen(filename, filePath, fileHash, title string, deviceID, inodeNum uint64) error {
 	var hashValue any
 	if fileHash != "" {
 		hashValue = fileHash
@@ -90,13 +94,52 @@ func (s *Store) RecordOpen(filename, filePath, fileHash string, deviceID, inodeN
 	}
 
 	_, err := s.db.Exec(
-		`INSERT INTO file_metadata (filename, filepath, file_hash, dev_id, inode_num, opened_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		filename, filePath, hashValue, devValue, inodeValue, time.Now().UTC(),
+		`INSERT INTO file_metadata (filename, filepath, file_hash, title, dev_id, inode_num, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		filename, filePath, hashValue, title, devValue, inodeValue, time.Now().UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("db: record open: %w", err)
 	}
 	return nil
+}
+
+// LookupByJobTitle matches the latest record per path by filename or PDF title.
+// Multiple matching paths are ambiguous and must not be used for attribution.
+func (s *Store) LookupByJobTitle(title string) (*FileMetadata, error) {
+	if title == "" {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`
+		SELECT f.id, f.filename, f.filepath, f.file_hash, f.dev_id, f.inode_num, f.opened_at, f.printed_at
+		FROM file_metadata f
+		WHERE (f.filename = ? OR f.title = ?)
+		  AND NOT EXISTS (SELECT 1 FROM file_metadata newer WHERE newer.filepath = f.filepath AND newer.id > f.id)
+		ORDER BY f.id DESC LIMIT 2`, filepath.Base(title), title)
+	if err != nil {
+		return nil, fmt.Errorf("db: lookup job title: %w", err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "db: close rows: %v\n", err)
+		}
+	}()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, sql.ErrNoRows
+	}
+	record, err := scanRow(rows)
+	if err != nil {
+		return nil, err
+	}
+	if rows.Next() {
+		return nil, ErrAmbiguousJobTitle
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return record, nil
 }
 
 // LookupByDevInode returns the most-recently-opened record matching device and inode.
@@ -163,6 +206,7 @@ func (s *Store) migrate() error {
 			filename    TEXT     NOT NULL,
 			filepath    TEXT     NOT NULL,
 			file_hash   TEXT,
+			title       TEXT,
 			dev_id      TEXT,
 			inode_num   TEXT,
 			opened_at   DATETIME NOT NULL,
@@ -205,6 +249,23 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	hasTitle, err := s.columnExists("file_metadata", "title")
+	if err != nil {
+		return err
+	}
+	if !hasTitle {
+		if _, err := s.db.Exec(`ALTER TABLE file_metadata ADD COLUMN title TEXT`); err != nil {
+			// Another process may have added the column after our check.
+			exists, checkErr := s.columnExists("file_metadata", "title")
+			if checkErr != nil {
+				return fmt.Errorf("db: check title column after migration failure: %w", checkErr)
+			}
+			if !exists {
+				return err
+			}
+		}
+	}
+
 	if _, err := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_file_hash
 			ON file_metadata (file_hash, opened_at DESC)
@@ -219,10 +280,17 @@ func (s *Store) migrate() error {
 		return err
 	}
 
+	if _, err := s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_title ON file_metadata (title);
+		CREATE INDEX IF NOT EXISTS idx_filepath_id ON file_metadata (filepath, id);
+	`); err != nil {
+		return err
+	}
+
 	return err
 }
 
-func scanRow(row *sql.Row) (*FileMetadata, error) {
+func scanRow(row interface{ Scan(...any) error }) (*FileMetadata, error) {
 	var m FileMetadata
 	var fileHash sql.NullString
 	var deviceID sql.NullString

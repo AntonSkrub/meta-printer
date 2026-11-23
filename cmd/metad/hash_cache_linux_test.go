@@ -42,14 +42,18 @@ func TestHashingWatchedFileStopsGeneratingEvents(t *testing.T) {
 			if _, err := cache.hash(ev.Path); err != nil {
 				t.Fatal(err)
 			}
-			if count > 2 {
-				t.Fatal("hashing keeps generating open events")
+			// The fixture is deliberately not a PDF; its parse failure must also be cached.
+			if _, err := cache.title(ev.Path); err == nil {
+				t.Fatal("expected invalid PDF error")
+			}
+			if count > 3 {
+				t.Fatal("metadata reads keep generating open events")
 			}
 		case err := <-w.Errors:
 			t.Fatal(err)
 		case <-timeout.C:
-			if count != 2 {
-				t.Fatalf("received %d events, want external open and one hash open", count)
+			if count < 2 {
+				t.Fatalf("received %d events, want external and metadata opens", count)
 			}
 			return
 		}

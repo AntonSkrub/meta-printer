@@ -9,7 +9,7 @@ The Meta-Printer is a background application that intercepts print jobs and adds
 The filter detects the format it receives, which may differ from the original job format after CUPS conversion. For example, an Okular PostScript job converted to PDF receives the PDF header.
 The PDF header starts approximately 10 mm from the left and 5 mm from the top of the page. Print scaling, page geometry and the printer's unprintable margins can affect its physical position or clip it.
 
-The original path is included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
+The original filename and path are included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
 
 The daemon caches hashes for unchanged files to prevent its own file reads from repeatedly triggering the watcher. SQLite waits briefly for concurrent writers; existing metadata history is retained and is not automatically pruned.
 
@@ -29,7 +29,7 @@ The project uses a hybrid identity model to map print jobs to file-open events:
 
 1. Daemon-side canonical identity: `(device id, inode)` captured from Linux file metadata when `metad` sees an `IN_OPEN` event.
 2. Print-time correlation: content hash and recency when `metafilter` can read the source file.
-3. Compatibility fallback: filename-based lookup when stronger signals are unavailable.
+3. Compatibility fallback: match the job title against a filename or embedded PDF title when stronger signals are unavailable.
 
 Why this is necessary:
 
@@ -41,7 +41,9 @@ Current practical behavior in `metafilter`:
 
 1. Try `(device id, inode)` lookup when the input path can be stat-ed.
 2. If no inode match, try file-hash lookup.
-3. If still no match, fall back to latest filename match.
+3. If still no match, compare the CUPS job title with recorded filenames and PDF titles. Use the record only when exactly one file path matches; otherwise retain the job title and log a warning for ambiguous matches.
+
+The daemon reads PDF titles when files are opened and caches them along with file hashes for unchanged files. Existing database records are retained but do not gain titles automatically: reopen a PDF in a watched directory after upgrading to record its title. A unique title is still only a best-effort match, not proof of identity.
 
 
 ## Jumpstart Prompt

@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -40,6 +41,7 @@ import (
 
 func init() {
 	defer interruption.Catch()
+	api.DisableConfigDir()
 	apperror.ErrorHandler = func(err error, msg string) { //nolint:reassign
 		log.Error().Err(err).Msg(msg)
 	}
@@ -122,8 +124,12 @@ func main() {
 			if err != nil {
 				log.Warn().Err(err).Str("path", ev.Path).Msg("metad: hash file")
 			}
+			title, err := hashes.title(ev.Path)
+			if err != nil {
+				log.Warn().Err(err).Str("path", ev.Path).Msg("metad: read PDF title")
+			}
 
-			if err := store.RecordOpen(ev.Name, ev.Path, hash, ev.DeviceID, ev.InodeNum); err != nil {
+			if err := store.RecordOpen(ev.Name, ev.Path, hash, title, ev.DeviceID, ev.InodeNum); err != nil {
 				log.Error().Err(err).Str("path", ev.Path).Msg("metad: record open")
 			} else {
 				log.Debug().Str("path", ev.Path).Msg("metad: recorded")
