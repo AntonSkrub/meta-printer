@@ -186,6 +186,91 @@ func TestLookupMissing(t *testing.T) {
 	}
 }
 
+func TestDeleteOpenedBefore(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	cutoff := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	records := []struct {
+		name     string
+		openedAt any
+		printed  any
+		expired  bool
+	}{
+		{"old.pdf", cutoff.Add(-time.Hour), cutoff, true},
+		{"near-old.pdf", cutoff.Add(-time.Nanosecond), nil, true},
+		{"legacy.pdf", "2026-11-24 09:59:59", nil, true},
+		{"boundary.pdf", cutoff, nil, false},
+		{"new.pdf", cutoff.Add(time.Nanosecond), nil, false},
+	}
+	for _, record := range records {
+		_, err := s.db.Exec(`INSERT INTO file_metadata (filename, filepath, opened_at, printed_at) VALUES (?, ?, ?, ?)`,
+			record.name, "/docs/"+record.name, record.openedAt, record.printed)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	count, err := s.DeleteOpenedBefore(cutoff.In(time.FixedZone("local", 3600)))
+	if err != nil || count != 3 {
+		t.Fatalf("deleted %d records, error %v; want 3", count, err)
+	}
+	for _, record := range records {
+		_, err := s.LookupByFilename(record.name)
+		if record.expired && !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("%s: expected deletion, got %v", record.name, err)
+		}
+		if !record.expired && err != nil {
+			t.Errorf("%s: expected retained record, got %v", record.name, err)
+		}
+	}
+	count, err = s.DeleteOpenedBefore(cutoff)
+	if err != nil || count != 0 {
+		t.Fatalf("repeat cleanup deleted %d records, error %v", count, err)
+	}
+}
+
+func TestDeleteOpenedBeforeReportsDatabaseErrors(t *testing.T) {
+	t.Parallel()
+	s, err := New(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeleteOpenedBefore(time.Now()); err == nil {
+		t.Fatal("expected cleanup error on closed database")
+	}
+}
+
+func TestDeleteOpenedBeforeClearsExpiredTitleAmbiguity(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	cutoff := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	for _, record := range []struct {
+		path string
+		time time.Time
+	}{
+		{"/old/sample.pdf", cutoff.Add(-time.Hour)},
+		{"/new/sample.pdf", cutoff.Add(time.Hour)},
+	} {
+		_, err := s.db.Exec(`INSERT INTO file_metadata (filename, filepath, title, opened_at) VALUES (?, ?, ?, ?)`,
+			"sample.pdf", record.path, "Sample PDF", record.time)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.LookupByJobTitle("Sample PDF"); !errors.Is(err, ErrAmbiguousJobTitle) {
+		t.Fatalf("expected ambiguity before cleanup, got %v", err)
+	}
+	if _, err := s.DeleteOpenedBefore(cutoff); err != nil {
+		t.Fatal(err)
+	}
+	record, err := s.LookupByJobTitle("Sample PDF")
+	if err != nil || record.Filepath != "/new/sample.pdf" {
+		t.Fatalf("lookup after cleanup = %+v, %v", record, err)
+	}
+}
+
 func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
 	t.Parallel()
 

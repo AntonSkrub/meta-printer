@@ -12,7 +12,7 @@ If the metadata is too long to fit on the first PDF page or PostScript cover, th
 
 The original filename and path are included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
 
-The daemon caches hashes for unchanged files to prevent its own file reads from repeatedly triggering the watcher. SQLite waits briefly for concurrent writers; existing metadata history is retained and is not automatically pruned.
+The daemon caches hashes for unchanged files to prevent its own file reads from repeatedly triggering the watcher. SQLite waits briefly for concurrent writers. At startup and hourly thereafter, the daemon removes records opened more than 24 hours ago; cleanup may happen later if the daemon is stopped or busy. Reopen a PDF if its record has expired. SQLite normally reuses freed space rather than immediately shrinking the database file.
 
 The daemon watches configured directories and their subdirectories, including directories created or moved into them later. Symbolic links to directories are not followed. Inotify cannot guarantee capturing file opens that happen before a newly created directory's watch is installed.
 
