@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/rs/zerolog"
@@ -96,6 +97,10 @@ func main() {
 		}
 	}()
 
+	cleanupExpiredRecords(store)
+	cleanupTicker := time.NewTicker(time.Hour)
+	defer cleanupTicker.Stop()
+
 	w, err := watcher.New()
 	if err != nil {
 		log.Error().Err(err).Msg("metad: create watcher")
@@ -136,10 +141,23 @@ func main() {
 			}
 		case err := <-w.Errors:
 			log.Error().Err(err).Msg("metad: watcher error")
+		case <-cleanupTicker.C:
+			cleanupExpiredRecords(store)
 		case <-sig:
 			log.Info().Msg("metad: shutting down")
 			return
 		}
+	}
+}
+
+func cleanupExpiredRecords(store *database.Store) {
+	count, err := store.DeleteOpenedBefore(time.Now().UTC().Add(-24 * time.Hour))
+	if err != nil {
+		log.Error().Err(err).Msg("metad: delete expired metadata")
+		return
+	}
+	if count > 0 {
+		log.Info().Int64("count", count).Msg("metad: deleted expired metadata")
 	}
 }
 

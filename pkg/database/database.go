@@ -103,6 +103,23 @@ func (s *Store) RecordOpen(filename, filePath, fileHash, title string, deviceID,
 	return nil
 }
 
+// DeleteOpenedBefore deletes records opened before cutoff, conservatively
+// retaining the cutoff second to accommodate timestamp formats in old databases.
+func (s *Store) DeleteOpenedBefore(cutoff time.Time) (int64, error) {
+	result, err := s.db.Exec(
+		`DELETE FROM file_metadata WHERE substr(opened_at, 1, 19) < ?`,
+		cutoff.UTC().Format("2006-01-02 15:04:05"),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("db: delete expired records: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("db: count expired records: %w", err)
+	}
+	return count, nil
+}
+
 // LookupByJobTitle matches the latest record per path by filename or PDF title.
 // Multiple matching paths are ambiguous and must not be used for attribution.
 func (s *Store) LookupByJobTitle(title string) (*FileMetadata, error) {
