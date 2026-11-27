@@ -308,6 +308,42 @@ func TestLookupByFileHashDistinguishesSameFilename(t *testing.T) {
 	}
 }
 
+func TestLookupByFileHashRejectsDistinctPaths(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	for i := 0; i < 2; i++ {
+		if err := s.RecordOpen("one.pdf", "/docs/one.pdf", "same", "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record, err := s.LookupByFileHash("same")
+	if err != nil || record.Filepath != "/docs/one.pdf" {
+		t.Fatalf("repeated opens of one path: %+v, %v", record, err)
+	}
+	if err := s.RecordOpen("two.pdf", "/downloads/two.pdf", "same", "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupByFileHash("same"); !errors.Is(err, ErrAmbiguousFileHash) {
+		t.Fatalf("expected ambiguity for identical files: %v", err)
+	}
+	if err := s.RecordOpen("two.pdf", "/downloads/two.pdf", "changed", "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	record, err = s.LookupByFileHash("same")
+	if err != nil || record.Filepath != "/docs/one.pdf" {
+		t.Fatalf("latest record should replace old hash: %+v, %v", record, err)
+	}
+	if err := s.RecordOpen("one.pdf", "/docs/one.pdf", "", "", 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupByFileHash("same"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("latest missing hash should not reuse old hash: %v", err)
+	}
+	if _, err := s.LookupByFileHash(""); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("empty hash must not match: %v", err)
+	}
+}
+
 func TestLookupByDevInode(t *testing.T) {
 	t.Parallel()
 

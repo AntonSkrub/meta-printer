@@ -9,8 +9,7 @@
 // is used. The processed document is written to stdout.
 //
 // The filter looks up richer metadata (original file path) from the metadata
-// daemon's SQLite database at /var/lib/meta-printer/<config.Get().DaemonDB.Name>.db, falling back
-// gracefully to the job title when the database is unavailable.
+// daemon's SQLite database at /var/lib/meta-printer/<config.Get().DaemonDB.Name>.db.
 //
 // The filter detects the format of its input stream: PDF receives metadata
 // overlaid on the first page, while PostScript receives a cover page.
@@ -156,14 +155,27 @@ func validateSpoolPath(path, spoolDir string) (string, error) {
 	return clean, nil
 }
 
-// buildMetadata constructs the Metadata struct for a print job.
-// It first tries to look up the original file path from the daemon's database;
-// if that fails (db unavailable or no matching record) it falls back to
-// using the job title as both filename and path.
+type matchStatus int
+
+const (
+	matchError matchStatus = iota
+	matchFound
+	matchAmbiguous
+	matchNotFound
+)
+
+type matchResult struct {
+	status matchStatus
+	record *database.FileMetadata
+	err    error
+}
+
+// buildMetadata constructs metadata for a print job, without guessing an
+// original path when lookup is ambiguous or unavailable.
 func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Metadata {
 	meta := &filter.Metadata{
 		Filename:  filepath.Base(title),
-		Filepath:  title,
+		Filepath:  "unavailable - lookup error",
 		PrintTime: time.Now(),
 	}
 
@@ -171,7 +183,7 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 
 	store, err := database.New(filepath.Join(cfg.DatabaseDir, config.Get().DaemonDB.Name+".db"))
 	if err != nil {
-		log.Warn().Err(err).Msg("metafilter: open metadata database; using job title")
+		log.Warn().Err(err).Msg("metafilter: open metadata database")
 		return meta
 	}
 	defer func() {
@@ -180,10 +192,38 @@ func buildMetadata(title string, input io.Reader, sourcePath string) *filter.Met
 		}
 	}()
 
-	return lookupMetadata(store, meta, title, input, sourcePath)
+	return metadataForMatch(store, meta, title, lookupMetadata(store, title, input, sourcePath))
 }
 
-func lookupMetadata(store *database.Store, meta *filter.Metadata, title string, input io.Reader, sourcePath string) *filter.Metadata {
+func metadataForMatch(store *database.Store, meta *filter.Metadata, title string, result matchResult) *filter.Metadata {
+	switch result.status {
+	case matchFound:
+		if result.record == nil {
+			log.Error().Msg("metafilter: metadata match has no record")
+			meta.Filepath = "unavailable - lookup error"
+			return meta
+		}
+		meta.Filename = result.record.Filename
+		meta.Filepath = result.record.Filepath
+		if err := store.MarkPrinted(result.record.ID); err != nil {
+			log.Error().Err(err).Msg("metafilter: mark printed")
+		}
+	case matchAmbiguous:
+		meta.Filepath = "unavailable - ambiguous match"
+		log.Warn().Err(result.err).Str("title", title).Msg("metafilter: ambiguous metadata match")
+	case matchNotFound:
+		meta.Filepath = "unavailable - no match"
+	case matchError:
+		meta.Filepath = "unavailable - lookup error"
+		log.Error().Err(result.err).Msg("metafilter: metadata lookup")
+	default:
+		meta.Filepath = "unavailable - lookup error"
+		log.Error().Int("status", int(result.status)).Msg("metafilter: invalid metadata match status")
+	}
+	return meta
+}
+
+func lookupMetadata(store *database.Store, title string, input io.Reader, sourcePath string) matchResult {
 	if sourcePath != "" {
 		sourceHash := ""
 		if rs, ok := input.(io.ReadSeeker); ok {
@@ -201,26 +241,18 @@ func lookupMetadata(store *database.Store, meta *filter.Metadata, title string, 
 		if deviceID, inodeNum, err := statIdentity(sourcePath); err != nil {
 			log.Warn().Err(err).Str("path", sourcePath).Msg("metafilter: stat input")
 		} else if record, err := store.LookupByDevInode(deviceID, inodeNum); err == nil {
-			meta.Filename = record.Filename
-			meta.Filepath = record.Filepath
-			if err := store.MarkPrinted(record.ID); err != nil {
-				log.Error().Err(err).Msg("metafilter: mark printed")
-			}
-			return meta
+			return matchResult{status: matchFound, record: record}
 		} else if err != sql.ErrNoRows {
-			log.Error().Err(err).Msg("metafilter: db inode lookup")
+			return matchResult{status: matchError, err: fmt.Errorf("db inode lookup: %w", err)}
 		}
 
 		if sourceHash != "" {
 			if record, err := store.LookupByFileHash(sourceHash); err == nil {
-				meta.Filename = record.Filename
-				meta.Filepath = record.Filepath
-				if err := store.MarkPrinted(record.ID); err != nil {
-					log.Error().Err(err).Msg("metafilter: mark printed")
-				}
-				return meta
+				return matchResult{status: matchFound, record: record}
+			} else if errors.Is(err, database.ErrAmbiguousFileHash) {
+				return matchResult{status: matchAmbiguous, err: err}
 			} else if err != sql.ErrNoRows {
-				log.Error().Err(err).Msg("metafilter: db hash lookup")
+				return matchResult{status: matchError, err: fmt.Errorf("db hash lookup: %w", err)}
 			}
 		}
 	}
@@ -228,19 +260,13 @@ func lookupMetadata(store *database.Store, meta *filter.Metadata, title string, 
 	record, err := store.LookupByJobTitle(title)
 	if err != nil {
 		if errors.Is(err, database.ErrAmbiguousJobTitle) {
-			log.Warn().Str("title", title).Msg("metafilter: ambiguous job title; using job title")
+			return matchResult{status: matchAmbiguous, err: err}
 		} else if !errors.Is(err, sql.ErrNoRows) {
-			log.Error().Err(err).Msg("metafilter: db job title lookup")
+			return matchResult{status: matchError, err: fmt.Errorf("db job title lookup: %w", err)}
 		}
-		return meta
+		return matchResult{status: matchNotFound}
 	}
-
-	if err := store.MarkPrinted(record.ID); err != nil {
-		log.Error().Err(err).Msg("metafilter: mark printed")
-	}
-	meta.Filename = record.Filename
-	meta.Filepath = record.Filepath
-	return meta
+	return matchResult{status: matchFound, record: record}
 }
 
 func hashBytes(data []byte) string {

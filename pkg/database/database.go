@@ -37,6 +37,9 @@ type Store struct {
 // ErrAmbiguousJobTitle means multiple files match a job title.
 var ErrAmbiguousJobTitle = errors.New("job title matches multiple files")
 
+// ErrAmbiguousFileHash means multiple file paths match the same content hash.
+var ErrAmbiguousFileHash = errors.New("file hash matches multiple files")
+
 // New opens (or creates) the SQLite database at path, creating any parent
 // directories as needed, and runs the schema migration.
 func New(path string) (*Store, error) {
@@ -135,6 +138,10 @@ func (s *Store) LookupByJobTitle(title string) (*FileMetadata, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db: lookup job title: %w", err)
 	}
+	return uniqueRecord(rows, ErrAmbiguousJobTitle)
+}
+
+func uniqueRecord(rows *sql.Rows, ambiguous error) (*FileMetadata, error) {
 	defer func() {
 		if err := rows.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "db: close rows: %v\n", err)
@@ -151,7 +158,7 @@ func (s *Store) LookupByJobTitle(title string) (*FileMetadata, error) {
 		return nil, err
 	}
 	if rows.Next() {
-		return nil, ErrAmbiguousJobTitle
+		return nil, ambiguous
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -172,17 +179,22 @@ func (s *Store) LookupByDevInode(deviceID, inodeNum uint64) (*FileMetadata, erro
 	return scanRow(row)
 }
 
-// LookupByFileHash returns the most-recently-opened record matching fileHash.
-// Returns sql.ErrNoRows if no match is found.
+// LookupByFileHash returns a match only when one path has this hash in its
+// latest record. Multiple matching paths return ErrAmbiguousFileHash.
 func (s *Store) LookupByFileHash(fileHash string) (*FileMetadata, error) {
-	row := s.db.QueryRow(`
-		SELECT id, filename, filepath, file_hash, dev_id, inode_num, opened_at, printed_at
-		FROM file_metadata
-		WHERE file_hash = ?
-		ORDER BY opened_at DESC
-		LIMIT 1
-	`, fileHash)
-	return scanRow(row)
+	if fileHash == "" {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := s.db.Query(`
+		SELECT f.id, f.filename, f.filepath, f.file_hash, f.dev_id, f.inode_num, f.opened_at, f.printed_at
+		FROM file_metadata f
+		WHERE f.file_hash = ?
+		  AND NOT EXISTS (SELECT 1 FROM file_metadata newer WHERE newer.filepath = f.filepath AND newer.id > f.id)
+		ORDER BY f.id DESC LIMIT 2`, fileHash)
+	if err != nil {
+		return nil, fmt.Errorf("db: lookup file hash: %w", err)
+	}
+	return uniqueRecord(rows, ErrAmbiguousFileHash)
 }
 
 // LookupByFilename returns the most-recently-opened record matching filename.

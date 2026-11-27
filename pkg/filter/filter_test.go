@@ -137,6 +137,34 @@ func TestPrependPostScriptWrapsLongPath(t *testing.T) {
 	}
 }
 
+func TestUnavailablePathAppearsInHeaders(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		path, psFirst, psContinuation string
+	}{
+		{"unavailable - ambiguous match", "unavailable - ambiguou", "s match"},
+		{"unavailable - no match", "unavailable - no match", ""},
+		{"unavailable - lookup error", "unavailable - lookup e", "rror"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			meta := &Metadata{Filename: "Sample PDF", Filepath: tc.path}
+			pdf, _ := buildHeaderPDF(meta, 90)
+			if !bytes.Contains(pdf, []byte("(Filename: Sample PDF)")) || !bytes.Contains(pdf, []byte("(Path: "+tc.path+")")) {
+				t.Fatalf("PDF header missing fallback: %s", pdf)
+			}
+			ps, err := buildPSCoverPage(meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(ps, "(  Filename : Sample PDF) show") ||
+				!strings.Contains(ps, "(  Path     : "+tc.psFirst+") show") ||
+				(tc.psContinuation != "" && !strings.Contains(ps, "("+tc.psContinuation+") show")) {
+				t.Fatalf("PostScript cover missing fallback: %s", ps)
+			}
+		})
+	}
+}
+
 func TestPrependPostScriptRejectsOversizedHeader(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer

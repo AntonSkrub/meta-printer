@@ -10,7 +10,7 @@ The filter detects the format it receives, which may differ from the original jo
 The PDF header is left-aligned at the top-right, approximately 10 mm from the right and 5 mm from the top of the page. Long paths wrap across lines. Print scaling, page geometry and the printer's unprintable margins can affect its physical position or clip it.
 If the metadata is too long to fit on the first PDF page or PostScript cover, the filter reports an error instead of silently cutting it off.
 
-The original filename and path are included when the filter can match the job to a daemon database record. Otherwise the CUPS job title is used as a fallback.
+The original filename and path are included when the filter can match the job to a daemon database record. Otherwise the filename uses the CUPS job title, and the path reports that it is unavailable (with a reason such as an ambiguous match).
 
 The daemon caches hashes for unchanged files to prevent its own file reads from repeatedly triggering the watcher. SQLite waits briefly for concurrent writers. At startup and hourly thereafter, the daemon removes records opened more than 24 hours ago; cleanup may happen later if the daemon is stopped or busy. Reopen a PDF if its record has expired. SQLite normally reuses freed space rather than immediately shrinking the database file.
 
@@ -31,7 +31,7 @@ The physical printer is set in `/etc/meta-printer/target.json` (root-owned), wit
 The project uses a hybrid identity model to map print jobs to file-open events:
 
 1. Daemon-side canonical identity: `(device id, inode)` captured from Linux file metadata when `metad` sees an `IN_OPEN` event.
-2. Print-time correlation: content hash and recency when `metafilter` can read the source file.
+2. Print-time correlation: content hash when `metafilter` can read the source file.
 3. Compatibility fallback: match the job title against a filename or embedded PDF title when stronger signals are unavailable.
 
 Why this is necessary:
@@ -43,10 +43,12 @@ Why this is necessary:
 Current practical behavior in `metafilter`:
 
 1. Try `(device id, inode)` lookup when the input path can be stat-ed.
-2. If no inode match, try file-hash lookup.
-3. If still no match, compare the CUPS job title with recorded filenames and PDF titles. Use the record only when exactly one file path matches; otherwise retain the job title and log a warning for ambiguous matches.
+2. If no inode match, try file-hash lookup. Identical hashes at multiple recorded paths are ambiguous and are not resolved by recency.
+3. If still no match, compare the CUPS job title with recorded filenames and PDF titles. Use the record only when exactly one file path matches. Ambiguous matches are logged; the path is shown as unavailable.
 
-The daemon reads PDF titles when files are opened and caches them along with file hashes for unchanged files. Existing database records are retained but do not gain titles automatically: reopen a PDF in a watched directory after upgrading to record its title. A unique title is still only a best-effort match, not proof of identity.
+The daemon reads PDF titles when files are opened and caches them along with file hashes for unchanged files. Existing database records are retained but do not gain titles automatically: reopen a PDF in a watched directory after upgrading to record its title. A unique title or hash is still only a best-effort match, not proof of identity: another indistinguishable file might not have a current record.
+
+CUPS filter arguments contain the job ID, user, job title and options, but do not generally identify the originating document path or viewer process. Intermediate filters receive converted data through standard input. The inotify events used by the daemon do not identify the process that opened a file; a file-descriptor close also does not prove a document was closed in a viewer. Reliable correlation of identical copies requires additional evidence from the submitting application or its print request.
 
 
 ## Jumpstart Prompt
